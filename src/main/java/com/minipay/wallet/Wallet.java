@@ -32,7 +32,8 @@ public class Wallet {
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
-    public Wallet() {}
+    public Wallet() {
+    }
 
     public Wallet(User user) {
         this.user = user;
@@ -40,17 +41,25 @@ public class Wallet {
 
     @PrePersist
     public void prePersist() {
-        if(this.createdAt == null) {
+        if (this.createdAt == null) {
             this.createdAt = LocalDateTime.now();
         }
 
-        if(this.balance == null) {
+        if (this.balance == null) {
             balance = BigDecimal.ZERO;
         }
     }
 
     public void deposit(BigDecimal amount) {
         this.balance = this.balance.add(amount);
+    }
+
+    public void withdraw(BigDecimal amount) {
+        if (balance.compareTo(amount) < 0) {
+            throw new IllegalArgumentException("Balance must be not lower to amount");
+        }
+
+        this.balance = this.balance.subtract(amount);
     }
 
     public Long getId() {
