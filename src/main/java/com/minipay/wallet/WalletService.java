@@ -44,17 +44,16 @@ public class WalletService {
 
     public Wallet getWalletByUserId(Long userId) {
         return walletRepository.findByUserId(userId)
-                .orElseThrow(() -> new IllegalArgumentException("User not found"));
+                .orElseThrow(() -> new IllegalArgumentException("Wallet not found"));
     }
 
     @Transactional
     public Wallet deposit(Long walletId, BigDecimal amount) {
-        Wallet wallet = walletRepository.findById(walletId)
-                .orElseThrow(() -> new IllegalArgumentException("Wallet not found"));
-
-        if (amount.compareTo(BigDecimal.ZERO) <= 0) {
+        if (amount == null || amount.compareTo(BigDecimal.ZERO) <= 0) {
             throw new IllegalArgumentException("Amount must be positive");
         }
+
+        Wallet wallet = getWalletById(walletId);
 
         wallet.deposit(amount);
         walletRepository.save(wallet);
@@ -65,12 +64,11 @@ public class WalletService {
 
     @Transactional
     public Wallet withdraw(Long walletId, BigDecimal amount) {
-        Wallet wallet = walletRepository.findById(walletId)
-                .orElseThrow(() -> new IllegalArgumentException("Wallet not found"));
-
-        if (amount.compareTo(BigDecimal.ZERO) <= 0) {
+        if (amount == null || amount.compareTo(BigDecimal.ZERO) <= 0) {
             throw new IllegalArgumentException("Amount must be positive");
         }
+
+        Wallet wallet = getWalletById(walletId);
 
         wallet.withdraw(amount);
         walletRepository.save(wallet);
@@ -81,17 +79,15 @@ public class WalletService {
 
     @Transactional
     public Wallet transfer(Long fromWalletId, Long toWalletId, BigDecimal amount) {
-        Wallet fromWallet = walletRepository.findById(fromWalletId)
-                .orElseThrow(() -> new IllegalArgumentException("From Wallet not found"));
-        Wallet toWallet = walletRepository.findById(toWalletId)
-                .orElseThrow(() -> new IllegalArgumentException("To Wallet not found"));
-
         if (fromWalletId.equals(toWalletId)) {
             throw new IllegalArgumentException("Source and destination wallets must be different");
         }
-        if (amount.compareTo(BigDecimal.ZERO) <= 0) {
+        if (amount == null || amount.compareTo(BigDecimal.ZERO) <= 0) {
             throw new IllegalArgumentException("Amount must be positive");
         }
+
+        Wallet fromWallet = getWalletById(fromWalletId);
+        Wallet toWallet = getWalletById(toWalletId);
 
         fromWallet.withdraw(amount);
         toWallet.deposit(amount);

@@ -18,7 +18,7 @@ public class TransactionService {
     }
 
     public List<TransactionResponse> getTransactionsByWalletId(Long walletId) {
-        if(!walletRepository.existsById(walletId)) {
+        if (!walletRepository.existsById(walletId)) {
             throw new IllegalArgumentException("Wallet not found");
         }
 
@@ -30,5 +30,4 @@ public class TransactionService {
                 .toList();
     }
 
-    
 }
