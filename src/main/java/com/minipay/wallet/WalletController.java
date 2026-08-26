@@ -40,19 +40,19 @@ public class WalletController {
     }
 
     @PostMapping("/{id}/deposit")
-    public WalletResponse deposit(@PathVariable Long id, @Valid @RequestBody AmountRequest request) {
+    public WalletResponse deposit(@PathVariable("id") Long id, @Valid @RequestBody AmountRequest request) {
         Wallet wallet = walletService.deposit(id, request.getAmount());
         return new WalletResponse(wallet);
     }
 
     @PostMapping("/{id}/withdraw")
-    public WalletResponse withdraw(@PathVariable Long id, @Valid @RequestBody AmountRequest request) {
+    public WalletResponse withdraw(@PathVariable("id") Long id, @Valid @RequestBody AmountRequest request) {
         Wallet wallet = walletService.withdraw(id, request.getAmount());
         return new WalletResponse(wallet);
     }
 
     @PostMapping("/{fromWalletId}/transfer")
-    public WalletResponse transfer(@PathVariable Long fromWalletId, @Valid @RequestBody TransferRequest request) {
+    public WalletResponse transfer(@PathVariable("fromWalletId") Long fromWalletId, @Valid @RequestBody TransferRequest request) {
         Wallet fromWallet = walletService.transfer(fromWalletId,
                 request.getToWalletId(),
                 request.getAmount());
@@ -60,19 +60,19 @@ public class WalletController {
     }
 
     @GetMapping("/{id}")
-    public WalletResponse getWalletById(@PathVariable Long id) {
+    public WalletResponse getWalletById(@PathVariable("id") Long id) {
         Wallet wallet = walletService.getWalletById(id);
         return new WalletResponse(wallet);
     }
 
     @GetMapping("/by-user/{userId}")
-    public WalletResponse getWalletByUserId(@PathVariable Long userId) {
+    public WalletResponse getWalletByUserId(@PathVariable("userId") Long userId) {
         Wallet wallet = walletService.getWalletByUserId(userId);
         return new WalletResponse(wallet);
     }
 
     @GetMapping("/{id}/transactions")
-    public List<TransactionResponse> getTransactionByWalletId(@PathVariable Long id) {
+    public List<TransactionResponse> getTransactionByWalletId(@PathVariable("id") Long id) {
         return transactionService.getTransactionsByWalletId(id);
     }
 
