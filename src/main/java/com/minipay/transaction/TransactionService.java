@@ -4,6 +4,7 @@ import java.util.List;
 
 import org.springframework.stereotype.Service;
 
+import com.minipay.common.exception.WalletNotFoundException;
 import com.minipay.transaction.dto.TransactionResponse;
 import com.minipay.wallet.WalletRepository;
 
@@ -19,7 +20,7 @@ public class TransactionService {
 
     public List<TransactionResponse> getTransactionsByWalletId(Long walletId) {
         if (!walletRepository.existsById(walletId)) {
-            throw new IllegalArgumentException("Wallet not found");
+            throw new WalletNotFoundException(walletId);
         }
 
         List<Transaction> transactions = transactionRepository

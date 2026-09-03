@@ -8,6 +8,8 @@ import java.math.BigDecimal;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import com.minipay.common.exception.InsufficientBalanceException;
+
 class WalletTest {
 
     private Wallet wallet;
@@ -40,7 +42,7 @@ class WalletTest {
 
         wallet.deposit(new BigDecimal("100.00"));
 
-        assertThrows(IllegalArgumentException.class,
+        assertThrows(InsufficientBalanceException.class,
                 () -> wallet.withdraw(new BigDecimal("200.00")));
         assertEquals(new BigDecimal("100.00"), wallet.getBalance());
     }

@@ -10,6 +10,11 @@ import jakarta.transaction.Transactional;
 
 import com.minipay.user.User;
 import com.minipay.transaction.TransactionRepository;
+import com.minipay.common.exception.InvalidAmountException;
+import com.minipay.common.exception.SelfTransferException;
+import com.minipay.common.exception.UserNotFoundException;
+import com.minipay.common.exception.WalletAlreadyExistsException;
+import com.minipay.common.exception.WalletNotFoundException;
 import com.minipay.transaction.Transaction;
 
 @Service
@@ -27,10 +32,10 @@ public class WalletService {
 
     public Wallet createWalletForUser(Long userId) {
         User user = userRepository.findById(userId)
-                .orElseThrow(() -> new IllegalArgumentException("User not found"));
+                .orElseThrow(() -> new UserNotFoundException(userId));
 
         if (walletRepository.existsByUserId(userId)) {
-            throw new IllegalArgumentException("Wallet with this user already exists");
+            throw new WalletAlreadyExistsException(userId);
         }
 
         Wallet wallet = new Wallet(user);
@@ -39,18 +44,18 @@ public class WalletService {
 
     public Wallet getWalletById(Long walletId) {
         return walletRepository.findById(walletId)
-                .orElseThrow(() -> new IllegalArgumentException("Wallet not found"));
+                .orElseThrow(() -> new WalletNotFoundException(walletId));
     }
 
     public Wallet getWalletByUserId(Long userId) {
         return walletRepository.findByUserId(userId)
-                .orElseThrow(() -> new IllegalArgumentException("Wallet not found"));
+                .orElseThrow(() -> WalletNotFoundException.forUserId(userId));
     }
 
     @Transactional
     public Wallet deposit(Long walletId, BigDecimal amount) {
         if (amount == null || amount.compareTo(BigDecimal.ZERO) <= 0) {
-            throw new IllegalArgumentException("Amount must be positive");
+            throw new InvalidAmountException();
         }
 
         Wallet wallet = getWalletById(walletId);
@@ -65,7 +70,7 @@ public class WalletService {
     @Transactional
     public Wallet withdraw(Long walletId, BigDecimal amount) {
         if (amount == null || amount.compareTo(BigDecimal.ZERO) <= 0) {
-            throw new IllegalArgumentException("Amount must be positive");
+            throw new InvalidAmountException();
         }
 
         Wallet wallet = getWalletById(walletId);
@@ -80,10 +85,10 @@ public class WalletService {
     @Transactional
     public Wallet transfer(Long fromWalletId, Long toWalletId, BigDecimal amount) {
         if (fromWalletId.equals(toWalletId)) {
-            throw new IllegalArgumentException("Source and destination wallets must be different");
+            throw new SelfTransferException(fromWalletId);
         }
         if (amount == null || amount.compareTo(BigDecimal.ZERO) <= 0) {
-            throw new IllegalArgumentException("Amount must be positive");
+            throw new InvalidAmountException();
         }
 
         Wallet fromWallet = getWalletById(fromWalletId);

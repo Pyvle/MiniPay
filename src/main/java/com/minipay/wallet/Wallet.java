@@ -13,6 +13,7 @@ import jakarta.persistence.Table;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
+import com.minipay.common.exception.InsufficientBalanceException;
 import com.minipay.user.User;
 
 @Entity
@@ -56,7 +57,7 @@ public class Wallet {
 
     public void withdraw(BigDecimal amount) {
         if (balance.compareTo(amount) < 0) {
-            throw new IllegalArgumentException("Balance must be not lower to amount");
+            throw new InsufficientBalanceException();
         }
 
         this.balance = this.balance.subtract(amount);

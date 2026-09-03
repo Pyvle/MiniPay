@@ -20,6 +20,11 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
+import com.minipay.common.exception.InsufficientBalanceException;
+import com.minipay.common.exception.SelfTransferException;
+import com.minipay.common.exception.UserNotFoundException;
+import com.minipay.common.exception.WalletAlreadyExistsException;
+import com.minipay.common.exception.WalletNotFoundException;
 import com.minipay.transaction.Transaction;
 import com.minipay.transaction.TransactionService;
 import com.minipay.transaction.dto.TransactionResponse;
@@ -84,9 +89,9 @@ class WalletControllerTest {
     }
 
     @Test
-    void createWalletShouldReturnBadRequestWhenServiceThrows() throws Exception {
+    void createWalletShouldReturnNotFoundWhenUserNotFound() throws Exception {
         when(walletService.createWalletForUser(999L))
-                .thenThrow(new IllegalArgumentException("User not found"));
+                .thenThrow(new UserNotFoundException(999L));
 
         mockMvc.perform(post("/api/wallets")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -95,8 +100,26 @@ class WalletControllerTest {
                           "userId": 999
                         }
                         """))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.message").value("User not found"));
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("User not found: 999"));
+
+        verify(walletService).createWalletForUser(999L);
+    }
+
+    @Test
+    void createWalletShouldReturnConflictWhenWalletAlreadyExists() throws Exception {
+        when(walletService.createWalletForUser(999L))
+                .thenThrow(new WalletAlreadyExistsException(999L));
+
+        mockMvc.perform(post("/api/wallets")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                        {
+                          "userId": 999
+                        }
+                        """))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.message").value("Wallet already exists for user: 999"));
 
         verify(walletService).createWalletForUser(999L);
     }
@@ -129,13 +152,13 @@ class WalletControllerTest {
     }
 
     @Test
-    void getWalletByIdShouldReturnBadRequestWhenWalletNotFound() throws Exception {
+    void getWalletByIdShouldReturnNotFoundWhenWalletNotFound() throws Exception {
         when(walletService.getWalletById(999L))
-                .thenThrow(new IllegalArgumentException("Wallet not found"));
+                .thenThrow(new WalletNotFoundException(999L));
 
         mockMvc.perform(get("/api/wallets/{id}", 999L))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.message").value("Wallet not found"));
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("Wallet not found: 999"));
 
         verify(walletService).getWalletById(999L);
     }
@@ -168,15 +191,15 @@ class WalletControllerTest {
     }
 
     @Test
-    void getWalletByUserIdShouldReturnBadRequestWhenWalletNotFound()
+    void getWalletByUserIdShouldReturnNotFoundWhenWalletNotFound()
             throws Exception {
 
         when(walletService.getWalletByUserId(999L))
-                .thenThrow(new IllegalArgumentException("Wallet not found"));
+                .thenThrow(WalletNotFoundException.forUserId(999L));
 
         mockMvc.perform(get("/api/wallets/by-user/{userId}", 999L))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.message").value("Wallet not found"));
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("Wallet not found for user: 999"));
 
         verify(walletService).getWalletByUserId(999L);
     }
@@ -229,9 +252,9 @@ class WalletControllerTest {
     }
 
     @Test
-    void depositShouldReturnBadRequestWhenServiceThrows() throws Exception {
+    void depositShouldReturnNotFoundWhenServiceThrows() throws Exception {
         when(walletService.deposit(999L, new BigDecimal("100.00")))
-                .thenThrow(new IllegalArgumentException("Wallet not found"));
+                .thenThrow(new WalletNotFoundException(999L));
 
         mockMvc.perform(post("/api/wallets/{id}/deposit", 999L)
                 .contentType(MediaType.APPLICATION_JSON)
@@ -240,8 +263,8 @@ class WalletControllerTest {
                           "amount": 100.00
                         }
                         """))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.message").value("Wallet not found"));
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("Wallet not found: 999"));
 
         verify(walletService)
                 .deposit(999L, new BigDecimal("100.00"));
@@ -313,8 +336,7 @@ class WalletControllerTest {
             throws Exception {
 
         when(walletService.withdraw(10L, new BigDecimal("500.00")))
-                .thenThrow(new IllegalArgumentException(
-                        "Balance must be not lower to amount"));
+                .thenThrow(new InsufficientBalanceException());
 
         mockMvc.perform(post("/api/wallets/{id}/withdraw", 10L)
                 .contentType(MediaType.APPLICATION_JSON)
@@ -323,9 +345,9 @@ class WalletControllerTest {
                           "amount": 500.00
                         }
                         """))
-                .andExpect(status().isBadRequest())
+                .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.message")
-                        .value("Balance must be not lower to amount"));
+                        .value("Insufficient balance"));
 
         verify(walletService)
                 .withdraw(10L, new BigDecimal("500.00"));
@@ -409,8 +431,7 @@ class WalletControllerTest {
         when(walletService.transfer(
                 10L,
                 10L,
-                new BigDecimal("50.00"))).thenThrow(new IllegalArgumentException(
-                        "Source and destination wallets must be different"));
+                new BigDecimal("50.00"))).thenThrow(new SelfTransferException(10L));
 
         mockMvc.perform(post("/api/wallets/{fromWalletId}/transfer", 10L)
                 .contentType(MediaType.APPLICATION_JSON)
@@ -422,7 +443,7 @@ class WalletControllerTest {
                         """))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value(
-                        "Source and destination wallets must be different"));
+                        "Cannot transfer to the same wallet: 10"));
 
         verify(walletService).transfer(
                 10L,
@@ -437,8 +458,7 @@ class WalletControllerTest {
         when(walletService.transfer(
                 10L,
                 20L,
-                new BigDecimal("500.00"))).thenThrow(new IllegalArgumentException(
-                        "Balance must be not lower to amount"));
+                new BigDecimal("500.00"))).thenThrow(new InsufficientBalanceException());
 
         mockMvc.perform(post("/api/wallets/{fromWalletId}/transfer", 10L)
                 .contentType(MediaType.APPLICATION_JSON)
@@ -448,9 +468,9 @@ class WalletControllerTest {
                           "amount": 500.00
                         }
                         """))
-                .andExpect(status().isBadRequest())
+                .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.message").value(
-                        "Balance must be not lower to amount"));
+                        "Insufficient balance"));
 
         verify(walletService).transfer(
                 10L,
@@ -521,15 +541,15 @@ class WalletControllerTest {
     }
 
     @Test
-    void getTransactionsShouldReturnBadRequestWhenWalletNotFound()
+    void getTransactionsShouldReturnNotFoundWhenWalletNotFound()
             throws Exception {
 
         when(transactionService.getTransactionsByWalletId(999L))
-                .thenThrow(new IllegalArgumentException("Wallet not found"));
+                .thenThrow(new WalletNotFoundException(999L));
 
         mockMvc.perform(get("/api/wallets/{id}/transactions", 999L))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.message").value("Wallet not found"));
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("Wallet not found: 999"));
 
         verify(transactionService).getTransactionsByWalletId(999L);
     }

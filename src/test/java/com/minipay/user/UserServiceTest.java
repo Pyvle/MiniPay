@@ -20,6 +20,9 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import com.minipay.common.exception.EmailAlreadyExistsException;
+import com.minipay.common.exception.UserNotFoundException;
+
 @ExtendWith(MockitoExtension.class)
 class UserServiceTest {
 
@@ -66,11 +69,12 @@ class UserServiceTest {
         when(userRepository.existsByEmail(email))
                 .thenReturn(true);
 
-        IllegalArgumentException exception = assertThrows(
-                IllegalArgumentException.class,
+        EmailAlreadyExistsException exception = assertThrows(
+                EmailAlreadyExistsException.class,
                 () -> userService.createUser(name, email));
 
-        assertEquals("User with this email already exists", exception.getMessage());
+        assertEquals("Email already exists: Ivan@email.com",
+                exception.getMessage());
         verify(userRepository, never()).save(any(User.class));
     }
 
@@ -92,11 +96,11 @@ class UserServiceTest {
         when(userRepository.findById(999L))
                 .thenReturn(Optional.empty());
 
-        IllegalArgumentException exception = assertThrows(
-                IllegalArgumentException.class,
+        UserNotFoundException exception = assertThrows(
+                UserNotFoundException.class,
                 () -> userService.getUserById(999L));
 
-        assertEquals("User not found", exception.getMessage());
+        assertEquals("User not found: 999", exception.getMessage());
 
     }
 

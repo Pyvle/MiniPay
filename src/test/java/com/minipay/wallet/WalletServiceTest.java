@@ -24,6 +24,12 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import com.minipay.common.exception.InsufficientBalanceException;
+import com.minipay.common.exception.InvalidAmountException;
+import com.minipay.common.exception.SelfTransferException;
+import com.minipay.common.exception.UserNotFoundException;
+import com.minipay.common.exception.WalletAlreadyExistsException;
+import com.minipay.common.exception.WalletNotFoundException;
 import com.minipay.transaction.Transaction;
 import com.minipay.transaction.TransactionRepository;
 import com.minipay.transaction.TransactionStatus;
@@ -89,11 +95,11 @@ class WalletServiceTest {
         when(userRepository.findById(999L))
                 .thenReturn(Optional.empty());
 
-        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
+        UserNotFoundException exception = assertThrows(UserNotFoundException.class,
                 () -> walletService.createWalletForUser(999L));
 
-        assertEquals("User not found", exception.getMessage());
-        verify(walletRepository, never()).existsById(any());
+        assertEquals("User not found: 999", exception.getMessage());
+        verify(walletRepository, never()).existsByUserId(any());
         verify(walletRepository, never()).save(any());
     }
 
@@ -105,10 +111,10 @@ class WalletServiceTest {
         when(walletRepository.existsByUserId(999L))
                 .thenReturn(true);
 
-        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
+        WalletAlreadyExistsException exception = assertThrows(WalletAlreadyExistsException.class,
                 () -> walletService.createWalletForUser(999L));
 
-        assertEquals("Wallet with this user already exists", exception.getMessage());
+        assertEquals("Wallet already exists for user: 999", exception.getMessage());
         verify(walletRepository, never()).save(any(Wallet.class));
     }
 
@@ -131,10 +137,10 @@ class WalletServiceTest {
         when(walletRepository.findById(999L))
                 .thenReturn(Optional.empty());
 
-        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
+        WalletNotFoundException exception = assertThrows(WalletNotFoundException.class,
                 () -> walletService.getWalletById(999L));
 
-        assertEquals("Wallet not found", exception.getMessage());
+        assertEquals("Wallet not found: 999", exception.getMessage());
     }
 
     // getWalletByUserId
@@ -156,10 +162,10 @@ class WalletServiceTest {
         when(walletRepository.findByUserId(999L))
                 .thenReturn(Optional.empty());
 
-        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
+        WalletNotFoundException exception = assertThrows(WalletNotFoundException.class,
                 () -> walletService.getWalletByUserId(999L));
 
-        assertEquals("Wallet not found", exception.getMessage());
+        assertEquals("Wallet not found for user: 999", exception.getMessage());
     }
 
     // deposit
@@ -196,7 +202,7 @@ class WalletServiceTest {
     @ValueSource(strings = { "0.00", "-0.01", "-100" })
     void depositShouldThrowWhenAmountIsNotPositive(String value) {
 
-        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
+        InvalidAmountException exception = assertThrows(InvalidAmountException.class,
                 () -> walletService.deposit(1L, new BigDecimal(value)));
 
         assertEquals("Amount must be positive", exception.getMessage());
@@ -206,8 +212,8 @@ class WalletServiceTest {
 
     @Test
     void depositShouldThrowWhenAmountIsNull() {
-        IllegalArgumentException exception = assertThrows(
-                IllegalArgumentException.class,
+        InvalidAmountException exception = assertThrows(
+                InvalidAmountException.class,
                 () -> walletService.deposit(1L, null));
 
         assertEquals("Amount must be positive", exception.getMessage());
@@ -223,10 +229,10 @@ class WalletServiceTest {
         when(walletRepository.findById(999L))
                 .thenReturn(Optional.empty());
 
-        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
+        WalletNotFoundException exception = assertThrows(WalletNotFoundException.class,
                 () -> walletService.deposit(999L, new BigDecimal("100.00")));
 
-        assertEquals("Wallet not found", exception.getMessage());
+        assertEquals("Wallet not found: 999", exception.getMessage());
         verify(walletRepository, never()).save(any(Wallet.class));
         verify(transactionRepository, never()).save(any(Transaction.class));
     }
@@ -267,10 +273,10 @@ class WalletServiceTest {
         when(walletRepository.findById(999L))
                 .thenReturn(Optional.empty());
 
-        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
+        WalletNotFoundException exception = assertThrows(WalletNotFoundException.class,
                 () -> walletService.withdraw(999L, new BigDecimal("100.00")));
 
-        assertEquals("Wallet not found", exception.getMessage());
+        assertEquals("Wallet not found: 999", exception.getMessage());
         verify(walletRepository, never()).save(any(Wallet.class));
         verify(transactionRepository, never()).save(any(Transaction.class));
     }
@@ -279,7 +285,7 @@ class WalletServiceTest {
     @ValueSource(strings = { "0.00", "-0.01", "-100" })
     void withdrawShouldThrowWhenAmountIsNotPositive(String value) {
 
-        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
+        InvalidAmountException exception = assertThrows(InvalidAmountException.class,
                 () -> walletService.withdraw(1L, new BigDecimal(value)));
 
         assertEquals("Amount must be positive", exception.getMessage());
@@ -289,8 +295,8 @@ class WalletServiceTest {
 
     @Test
     void withdrawShouldThrowWhenAmountIsNull() {
-        IllegalArgumentException exception = assertThrows(
-                IllegalArgumentException.class,
+        InvalidAmountException exception = assertThrows(
+                InvalidAmountException.class,
                 () -> walletService.withdraw(1L, null));
 
         assertEquals("Amount must be positive", exception.getMessage());
@@ -308,10 +314,10 @@ class WalletServiceTest {
         when(walletRepository.findById(1L))
                 .thenReturn(Optional.of(wallet));
 
-        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
+        InsufficientBalanceException exception = assertThrows(InsufficientBalanceException.class,
                 () -> walletService.withdraw(1L, new BigDecimal("500.00")));
 
-        assertEquals("Balance must be not lower to amount", exception.getMessage());
+        assertEquals("Insufficient balance", exception.getMessage());
         assertThat(wallet.getBalance())
                 .isEqualByComparingTo(new BigDecimal("200.00"));
         verify(walletRepository, never()).save(any(Wallet.class));
@@ -380,10 +386,10 @@ class WalletServiceTest {
         when(walletRepository.findById(999L))
                 .thenReturn(Optional.empty());
 
-        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
+        WalletNotFoundException exception = assertThrows(WalletNotFoundException.class,
                 () -> walletService.transfer(999L, 1L, new BigDecimal("100.00")));
 
-        assertEquals("Wallet not found", exception.getMessage());
+        assertEquals("Wallet not found: 999", exception.getMessage());
         verify(walletRepository).findById(999L);
         verify(walletRepository, never()).findById(1L);
         verify(walletRepository, never()).save(any(Wallet.class));
@@ -399,10 +405,10 @@ class WalletServiceTest {
         when(walletRepository.findById(1L))
                 .thenReturn((Optional.of(wallet)));
 
-        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
+        WalletNotFoundException exception = assertThrows(WalletNotFoundException.class,
                 () -> walletService.transfer(1L, 999L, new BigDecimal("100.00")));
 
-        assertEquals("Wallet not found", exception.getMessage());
+        assertEquals("Wallet not found: 999", exception.getMessage());
         verify(walletRepository).findById(1L);
         verify(walletRepository).findById(999L);
         verify(walletRepository, never()).save(any(Wallet.class));
@@ -412,10 +418,10 @@ class WalletServiceTest {
     @Test
     void transferShouldThrowWhenWalletsAreSame() {
 
-        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
+        SelfTransferException exception = assertThrows(SelfTransferException.class,
                 () -> walletService.transfer(1L, 1L, new BigDecimal("100.00")));
 
-        assertEquals("Source and destination wallets must be different", exception.getMessage());
+        assertEquals("Cannot transfer to the same wallet: 1", exception.getMessage());
         verify(walletRepository, never()).findById(1L);
         verify(walletRepository, never()).save(any(Wallet.class));
         verify(transactionRepository, never()).save(any(Transaction.class));
@@ -425,7 +431,7 @@ class WalletServiceTest {
     @ValueSource(strings = { "0.00", "-0.01", "-100" })
     void transferShouldThrowWhenAmountIsNotPositive(String value) {
 
-        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
+        InvalidAmountException exception = assertThrows(InvalidAmountException.class,
                 () -> walletService.transfer(1L, 2L, new BigDecimal(value)));
 
         assertEquals("Amount must be positive", exception.getMessage());
@@ -437,8 +443,8 @@ class WalletServiceTest {
 
     @Test
     void transferShouldThrowWhenAmountIsNull() {
-        IllegalArgumentException exception = assertThrows(
-                IllegalArgumentException.class,
+        InvalidAmountException exception = assertThrows(
+                InvalidAmountException.class,
                 () -> walletService.transfer(1L, 2L, null));
 
         assertEquals("Amount must be positive", exception.getMessage());
@@ -459,10 +465,10 @@ class WalletServiceTest {
         when(walletRepository.findById(2L))
                 .thenReturn(Optional.of(wallet2));
 
-        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
+        InsufficientBalanceException exception = assertThrows(InsufficientBalanceException.class,
                 () -> walletService.transfer(1L, 2L, new BigDecimal("500.00")));
 
-        assertEquals("Balance must be not lower to amount", exception.getMessage());
+        assertEquals("Insufficient balance", exception.getMessage());
         assertThat(wallet.getBalance())
                 .isEqualByComparingTo(new BigDecimal("100.00"));
         assertThat(wallet2.getBalance())

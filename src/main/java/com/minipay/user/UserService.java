@@ -4,6 +4,9 @@ import java.util.List;
 
 import org.springframework.stereotype.Service;
 
+import com.minipay.common.exception.EmailAlreadyExistsException;
+import com.minipay.common.exception.UserNotFoundException;
+
 @Service
 public class UserService {
     private final UserRepository userRepository;
@@ -14,7 +17,7 @@ public class UserService {
 
     public User createUser(String name, String email) {
         if(userRepository.existsByEmail(email)) {
-            throw new IllegalArgumentException("User with this email already exists");
+            throw new EmailAlreadyExistsException(email);
         }
 
         User user = new User(name, email);
@@ -23,7 +26,7 @@ public class UserService {
 
     public User getUserById(Long id) {
         return userRepository.findById(id)
-                .orElseThrow(() -> new IllegalArgumentException("User not found"));
+                .orElseThrow(() -> new UserNotFoundException(id));
     }
 
     public List<User> getAllUsers() {

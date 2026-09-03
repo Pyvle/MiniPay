@@ -17,6 +17,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import com.minipay.common.exception.WalletNotFoundException;
 import com.minipay.transaction.dto.TransactionResponse;
 import com.minipay.wallet.Wallet;
 import com.minipay.wallet.WalletRepository;
@@ -98,10 +99,10 @@ class TransactionServiceTest {
         when(walletRepository.existsById(999L))
                 .thenReturn(false);
 
-        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
+        WalletNotFoundException exception = assertThrows(WalletNotFoundException.class,
                 () -> transactionService.getTransactionsByWalletId(999L));
 
-        assertEquals("Wallet not found", exception.getMessage());
+        assertEquals("Wallet not found: 999", exception.getMessage());
         verify(walletRepository).existsById(999L);
         verify(transactionRepository, never())
                 .findAllByFromWalletIdOrToWalletIdOrderByCreatedAtDesc(999L, 999L);
