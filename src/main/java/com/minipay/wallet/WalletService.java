@@ -10,11 +10,11 @@ import jakarta.transaction.Transactional;
 
 import com.minipay.user.User;
 import com.minipay.transaction.TransactionRepository;
-import com.minipay.common.exception.InvalidAmountException;
 import com.minipay.common.exception.SelfTransferException;
 import com.minipay.common.exception.UserNotFoundException;
 import com.minipay.common.exception.WalletAlreadyExistsException;
 import com.minipay.common.exception.WalletNotFoundException;
+import com.minipay.common.validation.AmountValidator;
 import com.minipay.transaction.Transaction;
 
 @Service
@@ -54,9 +54,7 @@ public class WalletService {
 
     @Transactional
     public Wallet deposit(Long walletId, BigDecimal amount) {
-        if (amount == null || amount.compareTo(BigDecimal.ZERO) <= 0) {
-            throw new InvalidAmountException();
-        }
+        AmountValidator.validateAmount(amount);
 
         Wallet wallet = getWalletById(walletId);
 
@@ -69,9 +67,7 @@ public class WalletService {
 
     @Transactional
     public Wallet withdraw(Long walletId, BigDecimal amount) {
-        if (amount == null || amount.compareTo(BigDecimal.ZERO) <= 0) {
-            throw new InvalidAmountException();
-        }
+        AmountValidator.validateAmount(amount);
 
         Wallet wallet = getWalletById(walletId);
 
@@ -87,9 +83,7 @@ public class WalletService {
         if (fromWalletId.equals(toWalletId)) {
             throw new SelfTransferException(fromWalletId);
         }
-        if (amount == null || amount.compareTo(BigDecimal.ZERO) <= 0) {
-            throw new InvalidAmountException();
-        }
+        AmountValidator.validateAmount(amount);
 
         Wallet fromWallet = getWalletById(fromWalletId);
         Wallet toWallet = getWalletById(toWalletId);

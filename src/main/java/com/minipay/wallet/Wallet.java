@@ -13,12 +13,17 @@ import jakarta.persistence.Table;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
+import com.minipay.common.exception.BalanceLimitExceededException;
 import com.minipay.common.exception.InsufficientBalanceException;
+import com.minipay.common.validation.AmountValidator;
 import com.minipay.user.User;
 
 @Entity
 @Table(name = "wallets")
 public class Wallet {
+
+private static final BigDecimal MAX_BALANCE = new BigDecimal("99999999999999999.99");
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -52,10 +57,19 @@ public class Wallet {
     }
 
     public void deposit(BigDecimal amount) {
-        this.balance = this.balance.add(amount);
+        AmountValidator.validateAmount(amount);
+
+        BigDecimal newBalance = this.balance.add(amount);
+        if(newBalance.compareTo(MAX_BALANCE) > 0) {
+            throw new BalanceLimitExceededException();
+        }
+
+        this.balance = newBalance;
     }
 
     public void withdraw(BigDecimal amount) {
+        AmountValidator.validateAmount(amount);
+
         if (balance.compareTo(amount) < 0) {
             throw new InsufficientBalanceException();
         }

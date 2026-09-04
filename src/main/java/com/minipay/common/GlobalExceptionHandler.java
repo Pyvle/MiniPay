@@ -12,8 +12,10 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
+import com.minipay.common.exception.BalanceLimitExceededException;
 import com.minipay.common.exception.EmailAlreadyExistsException;
 import com.minipay.common.exception.InsufficientBalanceException;
+import com.minipay.common.exception.InvalidAmountException;
 import com.minipay.common.exception.SelfTransferException;
 import com.minipay.common.exception.UserNotFoundException;
 import com.minipay.common.exception.WalletAlreadyExistsException;
@@ -96,6 +98,18 @@ public class GlobalExceptionHandler {
     @ResponseStatus(HttpStatus.CONFLICT)
     public ErrorResponse handleInsufficientBalanceException(
             InsufficientBalanceException exception,
+            HttpServletRequest request) {
+        return new ErrorResponse(
+                HttpStatus.CONFLICT.value(),
+                HttpStatus.CONFLICT.getReasonPhrase(),
+                exception.getMessage(),
+                request.getRequestURI());
+    }
+
+    @ExceptionHandler(BalanceLimitExceededException.class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public ErrorResponse handleBalanceLimitExceededException(
+            BalanceLimitExceededException exception,
             HttpServletRequest request) {
         return new ErrorResponse(
                 HttpStatus.CONFLICT.value(),
@@ -200,6 +214,18 @@ public class GlobalExceptionHandler {
                 HttpStatus.BAD_REQUEST.value(),
                 HttpStatus.BAD_REQUEST.getReasonPhrase(),
                 message,
+                request.getRequestURI());
+    }
+
+    @ExceptionHandler(InvalidAmountException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public ErrorResponse handleInvalidAmountException(
+            InvalidAmountException exception,
+            HttpServletRequest request) {
+        return new ErrorResponse(
+                HttpStatus.BAD_REQUEST.value(),
+                HttpStatus.BAD_REQUEST.getReasonPhrase(),
+                exception.getMessage(),
                 request.getRequestURI());
     }
 }

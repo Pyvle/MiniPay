@@ -205,7 +205,7 @@ class WalletServiceTest {
         InvalidAmountException exception = assertThrows(InvalidAmountException.class,
                 () -> walletService.deposit(1L, new BigDecimal(value)));
 
-        assertEquals("Amount must be positive", exception.getMessage());
+        assertEquals("Amount must be at least 0.01", exception.getMessage());
         verify(walletRepository, never()).save(any(Wallet.class));
         verify(transactionRepository, never()).save(any(Transaction.class));
     }
@@ -216,7 +216,7 @@ class WalletServiceTest {
                 InvalidAmountException.class,
                 () -> walletService.deposit(1L, null));
 
-        assertEquals("Amount must be positive", exception.getMessage());
+        assertEquals("Amount must not be null", exception.getMessage());
 
         verify(walletRepository, never()).findById(anyLong());
         verify(walletRepository, never()).save(any());
@@ -288,7 +288,7 @@ class WalletServiceTest {
         InvalidAmountException exception = assertThrows(InvalidAmountException.class,
                 () -> walletService.withdraw(1L, new BigDecimal(value)));
 
-        assertEquals("Amount must be positive", exception.getMessage());
+        assertEquals("Amount must be at least 0.01", exception.getMessage());
         verify(walletRepository, never()).save(any(Wallet.class));
         verify(transactionRepository, never()).save(any(Transaction.class));
     }
@@ -299,7 +299,7 @@ class WalletServiceTest {
                 InvalidAmountException.class,
                 () -> walletService.withdraw(1L, null));
 
-        assertEquals("Amount must be positive", exception.getMessage());
+        assertEquals("Amount must not be null", exception.getMessage());
 
         verify(walletRepository, never()).findById(anyLong());
         verify(walletRepository, never()).save(any());
@@ -434,7 +434,7 @@ class WalletServiceTest {
         InvalidAmountException exception = assertThrows(InvalidAmountException.class,
                 () -> walletService.transfer(1L, 2L, new BigDecimal(value)));
 
-        assertEquals("Amount must be positive", exception.getMessage());
+        assertEquals("Amount must be at least 0.01", exception.getMessage());
         verify(walletRepository, never()).findById(1L);
         verify(walletRepository, never()).findById(2L);
         verify(walletRepository, never()).save(any(Wallet.class));
@@ -447,11 +447,24 @@ class WalletServiceTest {
                 InvalidAmountException.class,
                 () -> walletService.transfer(1L, 2L, null));
 
-        assertEquals("Amount must be positive", exception.getMessage());
+        assertEquals("Amount must not be null", exception.getMessage());
 
         verify(walletRepository, never()).findById(anyLong());
         verify(walletRepository, never()).save(any());
         verify(transactionRepository, never()).save(any());
+    }
+
+    @Test
+    void transferShouldThrowWhenAmountHasMoreThanTwoSignificantDecimalPlaces() {
+        InvalidAmountException exception = assertThrows(
+                InvalidAmountException.class,
+                () -> walletService.transfer(1L, 2L, new BigDecimal("10.001")));
+
+        assertEquals("Amount must not have fractions of a cent", exception.getMessage());
+
+        verify(walletRepository, never()).findById(anyLong());
+        verify(walletRepository, never()).save(any(Wallet.class));
+        verify(transactionRepository, never()).save(any(Transaction.class));
     }
 
     @Test

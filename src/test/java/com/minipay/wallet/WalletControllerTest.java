@@ -20,7 +20,9 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
+import com.minipay.common.exception.BalanceLimitExceededException;
 import com.minipay.common.exception.InsufficientBalanceException;
+import com.minipay.common.exception.InvalidAmountException;
 import com.minipay.common.exception.SelfTransferException;
 import com.minipay.common.exception.UserNotFoundException;
 import com.minipay.common.exception.WalletAlreadyExistsException;
@@ -282,6 +284,44 @@ class WalletControllerTest {
                         .value(containsString("amount:")));
 
         verifyNoInteractions(walletService);
+    }
+
+    @Test
+    void depositShouldReturnBadRequestWhenServiceThrowsInvalidAmountException()
+            throws Exception {
+
+        when(walletService.deposit(10L, new BigDecimal("500.00")))
+                .thenThrow(new InvalidAmountException());
+
+        mockMvc.perform(post("/api/wallets/{id}/deposit", 10L)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                        {
+                          "amount": 500.00
+                        }
+                        """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message")
+                        .value("Amount must be positive"));
+    }
+
+    @Test
+    void depositShouldReturnConflictWhenServiceThrowsBalanceLimitExceededException()
+            throws Exception {
+        
+        when(walletService.deposit(10L, new BigDecimal("0.01")))
+                .thenThrow(new BalanceLimitExceededException());
+        
+        mockMvc.perform(post("/api/wallets/{id}/deposit", 10L)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                        {
+                          "amount": 0.01
+                        }
+                        """))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.message")
+                        .value("Maximum wallet balance exceeded"));
     }
 
     @Test
@@ -553,4 +593,5 @@ class WalletControllerTest {
 
         verify(transactionService).getTransactionsByWalletId(999L);
     }
+
 }
