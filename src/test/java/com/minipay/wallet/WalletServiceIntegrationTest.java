@@ -7,9 +7,11 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.minipay.support.PostgresTestConfiguration;
 import com.minipay.transaction.Transaction;
 import com.minipay.transaction.TransactionRepository;
 import com.minipay.transaction.TransactionStatus;
@@ -25,9 +27,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
 @ActiveProfiles("test")
-@SpringBootTest
+@SpringBootTest(properties = "spring.jpa.hibernate.ddl-auto=validate")
 @Transactional
+@Import(PostgresTestConfiguration.class)
 class WalletServiceIntegrationTest {
+
 
     @Autowired
     private WalletService walletService;

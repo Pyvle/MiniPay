@@ -1,13 +1,16 @@
 spring:
+  config:
+    import: "optional:file:./.env[.properties]"
+    
   application:
     name: minipay
 
   datasource:
-    url: jdbc:postgresql://localhost:5432/minipay
-    username: postgres
-    password: admin
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
 
   jpa:
     hibernate:
-      ddl-auto: update
+      ddl-auto: validate
     show-sql: true

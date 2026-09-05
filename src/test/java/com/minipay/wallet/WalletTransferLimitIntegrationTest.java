@@ -8,15 +8,18 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.test.context.ActiveProfiles;
 
 import com.minipay.common.exception.BalanceLimitExceededException;
+import com.minipay.support.PostgresTestConfiguration;
 import com.minipay.transaction.TransactionRepository;
 import com.minipay.user.User;
 import com.minipay.user.UserRepository;
 
 @ActiveProfiles("test")
-@SpringBootTest
+@SpringBootTest(properties = "spring.jpa.hibernate.ddl-auto=validate")
+@Import(PostgresTestConfiguration.class)
 class WalletTransferLimitIntegrationTest {
 
     @Autowired
