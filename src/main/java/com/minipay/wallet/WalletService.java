@@ -56,7 +56,7 @@ public class WalletService {
     public Wallet deposit(Long walletId, BigDecimal amount) {
         AmountValidator.validateAmount(amount);
 
-        Wallet wallet = getWalletById(walletId);
+        Wallet wallet = getWalletForUpdate(walletId);
 
         wallet.deposit(amount);
         walletRepository.save(wallet);
@@ -69,7 +69,7 @@ public class WalletService {
     public Wallet withdraw(Long walletId, BigDecimal amount) {
         AmountValidator.validateAmount(amount);
 
-        Wallet wallet = getWalletById(walletId);
+        Wallet wallet = getWalletForUpdate(walletId);
 
         wallet.withdraw(amount);
         walletRepository.save(wallet);
@@ -85,8 +85,17 @@ public class WalletService {
         }
         AmountValidator.validateAmount(amount);
 
-        Wallet fromWallet = getWalletById(fromWalletId);
-        Wallet toWallet = getWalletById(toWalletId);
+        Long firstId = Math.min(fromWalletId, toWalletId);
+        Long secondId = Math.max(fromWalletId, toWalletId);
+        Wallet firstWallet =  getWalletForUpdate(firstId);
+        Wallet secondWallet = getWalletForUpdate(secondId);
+
+        Wallet fromWallet = fromWalletId.equals(firstId)
+            ? firstWallet
+            : secondWallet;
+        Wallet toWallet = toWalletId.equals(firstId)
+            ? firstWallet
+            : secondWallet;
 
         fromWallet.withdraw(amount);
         toWallet.deposit(amount);
@@ -97,4 +106,8 @@ public class WalletService {
         return fromWallet;
     }
 
+    private Wallet getWalletForUpdate(Long walletId) {
+        return walletRepository.findByIdForUpdate(walletId)
+                .orElseThrow(() -> new WalletNotFoundException(walletId));
+    }
 }

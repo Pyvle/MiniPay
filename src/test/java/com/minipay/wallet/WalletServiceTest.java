@@ -173,7 +173,7 @@ class WalletServiceTest {
     void depositShouldIncreaseBalanceAndSaveTransaction() {
         Wallet wallet = new Wallet();
 
-        when(walletRepository.findById(1L))
+        when(walletRepository.findByIdForUpdate(1L))
                 .thenReturn(Optional.of(wallet));
 
         Wallet result = walletService.deposit(1L, new BigDecimal("100.00"));
@@ -218,7 +218,7 @@ class WalletServiceTest {
 
         assertEquals("Amount must not be null", exception.getMessage());
 
-        verify(walletRepository, never()).findById(anyLong());
+        verify(walletRepository, never()).findByIdForUpdate(anyLong());
         verify(walletRepository, never()).save(any());
         verify(transactionRepository, never()).save(any());
     }
@@ -226,7 +226,7 @@ class WalletServiceTest {
     @Test
     void depositShouldThrowWhenWalletNotFound() {
 
-        when(walletRepository.findById(999L))
+        when(walletRepository.findByIdForUpdate(999L))
                 .thenReturn(Optional.empty());
 
         WalletNotFoundException exception = assertThrows(WalletNotFoundException.class,
@@ -243,7 +243,7 @@ class WalletServiceTest {
         Wallet wallet = new Wallet();
         wallet.deposit(new BigDecimal("200.00"));
 
-        when(walletRepository.findById(1L))
+        when(walletRepository.findByIdForUpdate(1L))
                 .thenReturn(Optional.of(wallet));
 
         Wallet result = walletService.withdraw(1L, new BigDecimal("100.00"));
@@ -270,7 +270,7 @@ class WalletServiceTest {
 
     @Test
     void withdrawShouldThrowWhenWalletNotFound() {
-        when(walletRepository.findById(999L))
+        when(walletRepository.findByIdForUpdate(999L))
                 .thenReturn(Optional.empty());
 
         WalletNotFoundException exception = assertThrows(WalletNotFoundException.class,
@@ -301,7 +301,7 @@ class WalletServiceTest {
 
         assertEquals("Amount must not be null", exception.getMessage());
 
-        verify(walletRepository, never()).findById(anyLong());
+        verify(walletRepository, never()).findByIdForUpdate(anyLong());
         verify(walletRepository, never()).save(any());
         verify(transactionRepository, never()).save(any());
     }
@@ -311,7 +311,7 @@ class WalletServiceTest {
         Wallet wallet = new Wallet();
         wallet.deposit(new BigDecimal("200.00"));
 
-        when(walletRepository.findById(1L))
+        when(walletRepository.findByIdForUpdate(1L))
                 .thenReturn(Optional.of(wallet));
 
         InsufficientBalanceException exception = assertThrows(InsufficientBalanceException.class,
@@ -329,7 +329,7 @@ class WalletServiceTest {
         Wallet wallet = new Wallet();
         wallet.deposit(new BigDecimal("100.00"));
 
-        when(walletRepository.findById(1L))
+        when(walletRepository.findByIdForUpdate(1L))
                 .thenReturn(Optional.of(wallet));
 
         Wallet result = walletService.withdraw(1L, new BigDecimal("100.00"));
@@ -350,10 +350,10 @@ class WalletServiceTest {
 
         fromWallet.deposit(new BigDecimal("300.00"));
 
-        when(walletRepository.findById(fromWalletId))
+        when(walletRepository.findByIdForUpdate(fromWalletId))
                 .thenReturn(Optional.of(fromWallet));
 
-        when(walletRepository.findById(toWalletId))
+        when(walletRepository.findByIdForUpdate(toWalletId))
                 .thenReturn(Optional.of(toWallet));
 
         Wallet result = walletService.transfer(fromWalletId, toWalletId, new BigDecimal("100.00"));
@@ -383,15 +383,18 @@ class WalletServiceTest {
 
     @Test
     void transferShouldThrowWhenSourceWalletNotFound() {
-        when(walletRepository.findById(999L))
+        when(walletRepository.findByIdForUpdate(1L))
+                .thenReturn(Optional.of(new Wallet()));
+
+        when(walletRepository.findByIdForUpdate(999L))
                 .thenReturn(Optional.empty());
 
         WalletNotFoundException exception = assertThrows(WalletNotFoundException.class,
                 () -> walletService.transfer(999L, 1L, new BigDecimal("100.00")));
 
         assertEquals("Wallet not found: 999", exception.getMessage());
-        verify(walletRepository).findById(999L);
-        verify(walletRepository, never()).findById(1L);
+        verify(walletRepository).findByIdForUpdate(1L);
+        verify(walletRepository).findByIdForUpdate(999L);
         verify(walletRepository, never()).save(any(Wallet.class));
         verify(transactionRepository, never()).save(any(Transaction.class));
     }
@@ -400,17 +403,17 @@ class WalletServiceTest {
     void transferShouldThrowWhenDestinationWalletNotFound() {
         Wallet wallet = new Wallet();
 
-        when(walletRepository.findById(999L))
+        when(walletRepository.findByIdForUpdate(999L))
                 .thenReturn((Optional.empty()));
-        when(walletRepository.findById(1L))
+        when(walletRepository.findByIdForUpdate(1L))
                 .thenReturn((Optional.of(wallet)));
 
         WalletNotFoundException exception = assertThrows(WalletNotFoundException.class,
                 () -> walletService.transfer(1L, 999L, new BigDecimal("100.00")));
 
         assertEquals("Wallet not found: 999", exception.getMessage());
-        verify(walletRepository).findById(1L);
-        verify(walletRepository).findById(999L);
+        verify(walletRepository).findByIdForUpdate(1L);
+        verify(walletRepository).findByIdForUpdate(999L);
         verify(walletRepository, never()).save(any(Wallet.class));
         verify(transactionRepository, never()).save(any(Transaction.class));
     }
@@ -422,7 +425,7 @@ class WalletServiceTest {
                 () -> walletService.transfer(1L, 1L, new BigDecimal("100.00")));
 
         assertEquals("Cannot transfer to the same wallet: 1", exception.getMessage());
-        verify(walletRepository, never()).findById(1L);
+        verify(walletRepository, never()).findByIdForUpdate(1L);
         verify(walletRepository, never()).save(any(Wallet.class));
         verify(transactionRepository, never()).save(any(Transaction.class));
     }
@@ -435,8 +438,8 @@ class WalletServiceTest {
                 () -> walletService.transfer(1L, 2L, new BigDecimal(value)));
 
         assertEquals("Amount must be at least 0.01", exception.getMessage());
-        verify(walletRepository, never()).findById(1L);
-        verify(walletRepository, never()).findById(2L);
+        verify(walletRepository, never()).findByIdForUpdate(1L);
+        verify(walletRepository, never()).findByIdForUpdate(2L);
         verify(walletRepository, never()).save(any(Wallet.class));
         verify(transactionRepository, never()).save(any(Transaction.class));
     }
@@ -449,7 +452,7 @@ class WalletServiceTest {
 
         assertEquals("Amount must not be null", exception.getMessage());
 
-        verify(walletRepository, never()).findById(anyLong());
+        verify(walletRepository, never()).findByIdForUpdate(anyLong());
         verify(walletRepository, never()).save(any());
         verify(transactionRepository, never()).save(any());
     }
@@ -462,7 +465,7 @@ class WalletServiceTest {
 
         assertEquals("Amount must not have fractions of a cent", exception.getMessage());
 
-        verify(walletRepository, never()).findById(anyLong());
+        verify(walletRepository, never()).findByIdForUpdate(anyLong());
         verify(walletRepository, never()).save(any(Wallet.class));
         verify(transactionRepository, never()).save(any(Transaction.class));
     }
@@ -473,9 +476,9 @@ class WalletServiceTest {
         Wallet wallet2 = new Wallet();
         wallet.deposit(new BigDecimal("100.00"));
 
-        when(walletRepository.findById(1L))
+        when(walletRepository.findByIdForUpdate(1L))
                 .thenReturn(Optional.of(wallet));
-        when(walletRepository.findById(2L))
+        when(walletRepository.findByIdForUpdate(2L))
                 .thenReturn(Optional.of(wallet2));
 
         InsufficientBalanceException exception = assertThrows(InsufficientBalanceException.class,
@@ -497,9 +500,9 @@ class WalletServiceTest {
         wallet.deposit(new BigDecimal("100.00"));
         Wallet wallet2 = new Wallet();
 
-        when(walletRepository.findById(1L))
+        when(walletRepository.findByIdForUpdate(1L))
                 .thenReturn(Optional.of(wallet));
-        when(walletRepository.findById(2L))
+        when(walletRepository.findByIdForUpdate(2L))
                 .thenReturn(Optional.of(wallet2));
 
         Wallet result = walletService.transfer(1L, 2L, new BigDecimal("100.00"));

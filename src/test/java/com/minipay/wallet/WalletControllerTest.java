@@ -16,6 +16,7 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.dao.CannotAcquireLockException;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -308,10 +309,10 @@ class WalletControllerTest {
     @Test
     void depositShouldReturnConflictWhenServiceThrowsBalanceLimitExceededException()
             throws Exception {
-        
+
         when(walletService.deposit(10L, new BigDecimal("0.01")))
                 .thenThrow(new BalanceLimitExceededException());
-        
+
         mockMvc.perform(post("/api/wallets/{id}/deposit", 10L)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
@@ -592,6 +593,31 @@ class WalletControllerTest {
                 .andExpect(jsonPath("$.message").value("Wallet not found: 999"));
 
         verify(transactionService).getTransactionsByWalletId(999L);
+    }
+
+    @Test
+    void depositShouldReturnConflictWhenWalletLockCannotBeAcquired()
+            throws Exception {
+
+        when(walletService.deposit(10L, new BigDecimal("20.00")))
+                .thenThrow(new CannotAcquireLockException(
+                        "Technical database details"));
+
+        mockMvc.perform(post("/api/wallets/{id}/deposit", 10L)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                        {
+                          "amount": 20.00
+                        }
+                        """))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.status").value(409))
+                .andExpect(jsonPath("$.error").value("Conflict"))
+                .andExpect(jsonPath("$.message").value(
+                        "Operation conflicted with another request. Please try again."))
+                .andExpect(jsonPath("$.path").value("/api/wallets/10/deposit"));
+
+        verify(walletService).deposit(10L, new BigDecimal("20.00"));
     }
 
 }
