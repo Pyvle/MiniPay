@@ -8,16 +8,21 @@ import com.minipay.wallet.dto.CreateWalletRequest;
 import com.minipay.wallet.dto.AmountRequest;
 import com.minipay.wallet.dto.TransferRequest;
 import com.minipay.wallet.dto.WalletResponse;
+import com.minipay.idempotency.IdempotencyResponse;
 import com.minipay.transaction.TransactionService;
 import com.minipay.transaction.dto.TransactionResponse;
 
 import jakarta.validation.Valid;
 
 import java.util.List;
+import java.util.UUID;
 
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 
@@ -40,23 +45,43 @@ public class WalletController {
     }
 
     @PostMapping("/{id}/deposit")
-    public WalletResponse deposit(@PathVariable("id") Long id, @Valid @RequestBody AmountRequest request) {
-        Wallet wallet = walletService.deposit(id, request.getAmount());
-        return new WalletResponse(wallet);
+    public ResponseEntity<String> deposit(
+            @PathVariable("id") Long id,
+            @Valid @RequestBody AmountRequest request,
+            @RequestHeader("Idempotency-Key") UUID idempotencyKey) {
+
+        IdempotencyResponse result = walletService.deposit(
+                id, request.getAmount(), idempotencyKey);
+
+        return ResponseEntity.status(result.status())
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(result.body());
     }
 
     @PostMapping("/{id}/withdraw")
-    public WalletResponse withdraw(@PathVariable("id") Long id, @Valid @RequestBody AmountRequest request) {
-        Wallet wallet = walletService.withdraw(id, request.getAmount());
-        return new WalletResponse(wallet);
+    public ResponseEntity<String> withdraw(@PathVariable("id") Long id,
+            @Valid @RequestBody AmountRequest request,
+            @RequestHeader("Idempotency-Key") UUID idempotencyKey) {
+
+        IdempotencyResponse result = walletService.withdraw(
+                id, request.getAmount(), idempotencyKey);
+        return ResponseEntity.status(result.status())
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(result.body());
     }
 
     @PostMapping("/{fromWalletId}/transfer")
-    public WalletResponse transfer(@PathVariable("fromWalletId") Long fromWalletId, @Valid @RequestBody TransferRequest request) {
-        Wallet fromWallet = walletService.transfer(fromWalletId,
+    public ResponseEntity<String> transfer(@PathVariable("fromWalletId") Long fromWalletId,
+            @Valid @RequestBody TransferRequest request,
+            @RequestHeader("Idempotency-Key") UUID idempotencyKey) {
+
+        IdempotencyResponse result = walletService.transfer(fromWalletId,
                 request.getToWalletId(),
-                request.getAmount());
-        return new WalletResponse(fromWallet);
+                request.getAmount(),
+                idempotencyKey);
+        return ResponseEntity.status(result.status())
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(result.body());
     }
 
     @GetMapping("/{id}")

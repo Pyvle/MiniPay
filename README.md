@@ -46,6 +46,35 @@ The first version focuses on the core payment flow:
 - audit logs
 - UI
 
+## Wallet request idempotency
+
+Deposit, withdrawal, and transfer endpoints require an `Idempotency-Key` header
+containing a UUID. Use a new key for each new intended operation.
+
+- Repeating a successful request with the same key and parameters returns its
+  original HTTP status and JSON body without moving money again. The response
+  contains the original balance, even if later operations changed the wallet.
+- Reusing a stored key with a different operation type, wallet, recipient, or
+  amount returns `409 Conflict`. Numerically equal amounts such as `20.0` and
+  `20.00` are treated as equal. Keys are shared across the three operation types.
+- Reserving the key, updating balances, recording the financial operation, and
+  saving the response happen in one database transaction.
+- Failed attempts (including insufficient funds, balance limits, and lock
+  timeouts) roll back all those changes. No new key or financial operation is
+  retained. After resolving the cause, the same request can be retried with the
+  same key. A conflicting retry does not remove the original successful record.
+
+### Status meanings
+
+- `IdempotencyStatus.PROCESSING`: an intermediate state inside the uncommitted
+  transaction, not a separately committed background job.
+- `IdempotencyStatus.COMPLETED`: the successful operation and its response have
+  been saved together.
+- `TransactionStatus.SUCCESS`: the status of a persisted financial operation.
+- `TransactionStatus.CREATED` and `FAILED` remain in the enum but are not used by
+  the current synchronous flow. Failed attempts are not recorded in a separate
+  transaction; durable failure auditing is outside the current scope.
+
 ## Development Plan
 
 ### MVP

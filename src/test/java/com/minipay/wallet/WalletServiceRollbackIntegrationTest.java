@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
+import java.util.UUID;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -41,6 +42,7 @@ class WalletServiceRollbackIntegrationTest {
 
     @Test
     void transferShouldRollbackWhenTransactionSaveFails() {
+        UUID key = UUID.randomUUID();
         User savedToUser = userRepository.saveAndFlush(
                 new User("Obama", "obama@example.com"));
         Wallet toWallet = walletRepository.saveAndFlush(
@@ -62,7 +64,7 @@ class WalletServiceRollbackIntegrationTest {
                 () -> walletService.transfer(
                         fromWalletId,
                         toWalletId,
-                        new BigDecimal("100.00")));
+                        new BigDecimal("100.00"), key));
 
         assertEquals("Database error", exception.getMessage());
 

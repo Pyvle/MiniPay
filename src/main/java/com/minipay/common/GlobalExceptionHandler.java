@@ -8,6 +8,7 @@ import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
@@ -15,6 +16,7 @@ import org.springframework.dao.PessimisticLockingFailureException;
 
 import com.minipay.common.exception.BalanceLimitExceededException;
 import com.minipay.common.exception.EmailAlreadyExistsException;
+import com.minipay.common.exception.IdempotencyConflictException;
 import com.minipay.common.exception.InsufficientBalanceException;
 import com.minipay.common.exception.InvalidAmountException;
 import com.minipay.common.exception.SelfTransferException;
@@ -240,6 +242,31 @@ public class GlobalExceptionHandler {
                 HttpStatus.CONFLICT.value(),
                 HttpStatus.CONFLICT.getReasonPhrase(),
                 "Operation conflicted with another request. Please try again.",
+                request.getRequestURI());
+    }
+
+    @ExceptionHandler(MissingRequestHeaderException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public ErrorResponse handleMissingRequestHeaderException(
+            MissingRequestHeaderException exception,
+            HttpServletRequest request) {
+        return new ErrorResponse(
+                HttpStatus.BAD_REQUEST.value(),
+                HttpStatus.BAD_REQUEST.getReasonPhrase(),
+                "Missing required header: " + exception.getHeaderName(),
+                request.getRequestURI());
+    }
+
+    @ExceptionHandler(IdempotencyConflictException.class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public ErrorResponse handleIdempotencyConflictException(
+        IdempotencyConflictException  exception,
+            HttpServletRequest request) {
+
+        return new ErrorResponse(
+                HttpStatus.CONFLICT.value(),
+                HttpStatus.CONFLICT.getReasonPhrase(),
+                exception.getMessage(),
                 request.getRequestURI());
     }
 }

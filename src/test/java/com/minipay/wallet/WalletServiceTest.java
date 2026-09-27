@@ -14,6 +14,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.math.BigDecimal;
 import java.util.Optional;
+import java.util.UUID;
+import java.util.function.Supplier;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.minipay.idempotency.IdempotencyResponse;
+import com.minipay.idempotency.IdempotencyService;
+import com.minipay.wallet.dto.WalletResponse;
+import static org.mockito.ArgumentMatchers.eq;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -48,6 +55,29 @@ class WalletServiceTest {
 
     @Mock
     private TransactionRepository transactionRepository;
+
+    @Mock
+    private IdempotencyService idempotencyService;
+
+    private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
+
+    // Execute the callback so these tests still exercise wallet business logic.
+    private void executeOperation(UUID key, TransactionType type, Long walletId,
+            Long toWalletId, BigDecimal amount) {
+        when(idempotencyService.execute(eq(key), eq(type), eq(walletId),
+                eq(toWalletId), eq(amount), any()))
+                .thenAnswer(invocation -> {
+                    Supplier<WalletResponse> operation = invocation.getArgument(5);
+                    return new IdempotencyResponse(200,
+                            objectMapper.writeValueAsString(operation.get()));
+                });
+    }
+
+    private void assertResponseBalance(IdempotencyResponse response, String balance) throws Exception {
+        assertEquals(200, response.status());
+        assertThat(objectMapper.readTree(response.body()).get("balance").decimalValue())
+                .isEqualByComparingTo(balance);
+    }
 
     @InjectMocks
     private WalletService walletService;
@@ -170,19 +200,22 @@ class WalletServiceTest {
 
     // deposit
     @Test
-    void depositShouldIncreaseBalanceAndSaveTransaction() {
-        Wallet wallet = new Wallet();
+    void depositShouldIncreaseBalanceAndSaveTransaction() throws Exception {
+        UUID key = UUID.randomUUID();
+        Wallet wallet = new Wallet(new User("Ivan", "ivan@example.com"));
+
+        executeOperation(key, TransactionType.DEPOSIT, 1L, null, new BigDecimal("100.00"));
 
         when(walletRepository.findByIdForUpdate(1L))
                 .thenReturn(Optional.of(wallet));
 
-        Wallet result = walletService.deposit(1L, new BigDecimal("100.00"));
+        IdempotencyResponse result = walletService.deposit(1L, new BigDecimal("100.00"), key);
 
-        assertSame(wallet, result);
-        assertThat(result.getBalance())
+        assertResponseBalance(result, "100.00");
+        assertThat(wallet.getBalance())
                 .isEqualByComparingTo(new BigDecimal("100.00"));
 
-        verify(walletRepository).save(result);
+        verify(walletRepository).save(wallet);
 
         ArgumentCaptor<Transaction> captor = ArgumentCaptor.forClass(Transaction.class);
 
@@ -191,7 +224,7 @@ class WalletServiceTest {
         Transaction saveTransaction = captor.getValue();
 
         assertNull(saveTransaction.getFromWallet());
-        assertSame(result, saveTransaction.getToWallet());
+        assertSame(wallet, saveTransaction.getToWallet());
         assertEquals(TransactionType.DEPOSIT, saveTransaction.getType());
         assertEquals(TransactionStatus.SUCCESS, saveTransaction.getStatus());
         assertThat(saveTransaction.getAmount())
@@ -201,9 +234,10 @@ class WalletServiceTest {
     @ParameterizedTest
     @ValueSource(strings = { "0.00", "-0.01", "-100" })
     void depositShouldThrowWhenAmountIsNotPositive(String value) {
+        UUID key = UUID.randomUUID();
 
         InvalidAmountException exception = assertThrows(InvalidAmountException.class,
-                () -> walletService.deposit(1L, new BigDecimal(value)));
+                () -> walletService.deposit(1L, new BigDecimal(value), key));
 
         assertEquals("Amount must be at least 0.01", exception.getMessage());
         verify(walletRepository, never()).save(any(Wallet.class));
@@ -212,9 +246,10 @@ class WalletServiceTest {
 
     @Test
     void depositShouldThrowWhenAmountIsNull() {
+        UUID key = UUID.randomUUID();
         InvalidAmountException exception = assertThrows(
                 InvalidAmountException.class,
-                () -> walletService.deposit(1L, null));
+                () -> walletService.deposit(1L, null, key));
 
         assertEquals("Amount must not be null", exception.getMessage());
 
@@ -225,12 +260,15 @@ class WalletServiceTest {
 
     @Test
     void depositShouldThrowWhenWalletNotFound() {
+        UUID key = UUID.randomUUID();
+
+        executeOperation(key, TransactionType.DEPOSIT, 999L, null, new BigDecimal("100.00"));
 
         when(walletRepository.findByIdForUpdate(999L))
                 .thenReturn(Optional.empty());
 
         WalletNotFoundException exception = assertThrows(WalletNotFoundException.class,
-                () -> walletService.deposit(999L, new BigDecimal("100.00")));
+                () -> walletService.deposit(999L, new BigDecimal("100.00"), key));
 
         assertEquals("Wallet not found: 999", exception.getMessage());
         verify(walletRepository, never()).save(any(Wallet.class));
@@ -239,20 +277,23 @@ class WalletServiceTest {
 
     // withdraw
     @Test
-    void withdrawShouldDecreaseBalanceAndSaveTransaction() {
-        Wallet wallet = new Wallet();
+    void withdrawShouldDecreaseBalanceAndSaveTransaction() throws Exception {
+        UUID key = UUID.randomUUID();
+        Wallet wallet = new Wallet(new User("Ivan", "ivan@example.com"));
         wallet.deposit(new BigDecimal("200.00"));
+
+        executeOperation(key, TransactionType.WITHDRAWAL, 1L, null, new BigDecimal("100.00"));
 
         when(walletRepository.findByIdForUpdate(1L))
                 .thenReturn(Optional.of(wallet));
 
-        Wallet result = walletService.withdraw(1L, new BigDecimal("100.00"));
+        IdempotencyResponse result = walletService.withdraw(1L, new BigDecimal("100.00"), key);
 
-        assertSame(wallet, result);
-        assertThat(result.getBalance())
+        assertResponseBalance(result, "100.00");
+        assertThat(wallet.getBalance())
                 .isEqualByComparingTo(new BigDecimal("100.00"));
 
-        verify(walletRepository).save(result);
+        verify(walletRepository).save(wallet);
 
         ArgumentCaptor<Transaction> captor = ArgumentCaptor.forClass(Transaction.class);
 
@@ -261,7 +302,7 @@ class WalletServiceTest {
         Transaction saveTransaction = captor.getValue();
 
         assertNull(saveTransaction.getToWallet());
-        assertSame(result, saveTransaction.getFromWallet());
+        assertSame(wallet, saveTransaction.getFromWallet());
         assertEquals(TransactionType.WITHDRAWAL, saveTransaction.getType());
         assertEquals(TransactionStatus.SUCCESS, saveTransaction.getStatus());
         assertThat(saveTransaction.getAmount())
@@ -270,11 +311,14 @@ class WalletServiceTest {
 
     @Test
     void withdrawShouldThrowWhenWalletNotFound() {
+        UUID key = UUID.randomUUID();
+        executeOperation(key, TransactionType.WITHDRAWAL, 999L, null, new BigDecimal("100.00"));
+
         when(walletRepository.findByIdForUpdate(999L))
                 .thenReturn(Optional.empty());
 
         WalletNotFoundException exception = assertThrows(WalletNotFoundException.class,
-                () -> walletService.withdraw(999L, new BigDecimal("100.00")));
+                () -> walletService.withdraw(999L, new BigDecimal("100.00"), key));
 
         assertEquals("Wallet not found: 999", exception.getMessage());
         verify(walletRepository, never()).save(any(Wallet.class));
@@ -284,9 +328,10 @@ class WalletServiceTest {
     @ParameterizedTest
     @ValueSource(strings = { "0.00", "-0.01", "-100" })
     void withdrawShouldThrowWhenAmountIsNotPositive(String value) {
+        UUID key = UUID.randomUUID();
 
         InvalidAmountException exception = assertThrows(InvalidAmountException.class,
-                () -> walletService.withdraw(1L, new BigDecimal(value)));
+                () -> walletService.withdraw(1L, new BigDecimal(value), key));
 
         assertEquals("Amount must be at least 0.01", exception.getMessage());
         verify(walletRepository, never()).save(any(Wallet.class));
@@ -295,9 +340,10 @@ class WalletServiceTest {
 
     @Test
     void withdrawShouldThrowWhenAmountIsNull() {
+        UUID key = UUID.randomUUID();
         InvalidAmountException exception = assertThrows(
                 InvalidAmountException.class,
-                () -> walletService.withdraw(1L, null));
+                () -> walletService.withdraw(1L, null, key));
 
         assertEquals("Amount must not be null", exception.getMessage());
 
@@ -308,14 +354,17 @@ class WalletServiceTest {
 
     @Test
     void withdrawShouldThrowWhenBalanceIsInsufficient() {
+        UUID key = UUID.randomUUID();
         Wallet wallet = new Wallet();
         wallet.deposit(new BigDecimal("200.00"));
+
+        executeOperation(key, TransactionType.WITHDRAWAL, 1L, null, new BigDecimal("500.00"));
 
         when(walletRepository.findByIdForUpdate(1L))
                 .thenReturn(Optional.of(wallet));
 
         InsufficientBalanceException exception = assertThrows(InsufficientBalanceException.class,
-                () -> walletService.withdraw(1L, new BigDecimal("500.00")));
+                () -> walletService.withdraw(1L, new BigDecimal("500.00"), key));
 
         assertEquals("Insufficient balance", exception.getMessage());
         assertThat(wallet.getBalance())
@@ -325,16 +374,19 @@ class WalletServiceTest {
     }
 
     @Test
-    void withdrawShouldAllowWithdrawingEntireBalance() {
-        Wallet wallet = new Wallet();
+    void withdrawShouldAllowWithdrawingEntireBalance() throws Exception {
+        UUID key = UUID.randomUUID();
+        Wallet wallet = new Wallet(new User("Ivan", "ivan@example.com"));
         wallet.deposit(new BigDecimal("100.00"));
+
+        executeOperation(key, TransactionType.WITHDRAWAL, 1L, null, new BigDecimal("100.00"));
 
         when(walletRepository.findByIdForUpdate(1L))
                 .thenReturn(Optional.of(wallet));
 
-        Wallet result = walletService.withdraw(1L, new BigDecimal("100.00"));
+        IdempotencyResponse result = walletService.withdraw(1L, new BigDecimal("100.00"), key);
 
-        assertSame(wallet, result);
+        assertResponseBalance(result, "0.00");
         verify(walletRepository).save(wallet);
         assertThat(wallet.getBalance()).isEqualByComparingTo("0.00");
         verify(transactionRepository).save(any(Transaction.class));
@@ -342,13 +394,16 @@ class WalletServiceTest {
 
     // transfer
     @Test
-    void transferShouldMoveMoneyAndSaveTransaction() {
+    void transferShouldMoveMoneyAndSaveTransaction() throws Exception {
+        UUID key = UUID.randomUUID();
         Long fromWalletId = 1L;
         Long toWalletId = 2L;
-        Wallet fromWallet = new Wallet();
-        Wallet toWallet = new Wallet();
+        Wallet fromWallet = new Wallet(new User("Ivan", "ivan@example.com"));
+        Wallet toWallet = new Wallet(new User("Ivan", "ivan@example.com"));
 
         fromWallet.deposit(new BigDecimal("300.00"));
+
+        executeOperation(key, TransactionType.TRANSFER, fromWalletId, toWalletId, new BigDecimal("100.00"));
 
         when(walletRepository.findByIdForUpdate(fromWalletId))
                 .thenReturn(Optional.of(fromWallet));
@@ -356,9 +411,9 @@ class WalletServiceTest {
         when(walletRepository.findByIdForUpdate(toWalletId))
                 .thenReturn(Optional.of(toWallet));
 
-        Wallet result = walletService.transfer(fromWalletId, toWalletId, new BigDecimal("100.00"));
+        IdempotencyResponse result = walletService.transfer(fromWalletId, toWalletId, new BigDecimal("100.00"), key);
 
-        assertSame(fromWallet, result);
+        assertResponseBalance(result, "200.00");
         assertThat(fromWallet.getBalance())
                 .isEqualByComparingTo(new BigDecimal("200.00"));
         assertThat(toWallet.getBalance())
@@ -383,6 +438,9 @@ class WalletServiceTest {
 
     @Test
     void transferShouldThrowWhenSourceWalletNotFound() {
+        UUID key = UUID.randomUUID();
+        executeOperation(key, TransactionType.TRANSFER, 999L, 1L, new BigDecimal("100.00"));
+
         when(walletRepository.findByIdForUpdate(1L))
                 .thenReturn(Optional.of(new Wallet()));
 
@@ -390,7 +448,7 @@ class WalletServiceTest {
                 .thenReturn(Optional.empty());
 
         WalletNotFoundException exception = assertThrows(WalletNotFoundException.class,
-                () -> walletService.transfer(999L, 1L, new BigDecimal("100.00")));
+                () -> walletService.transfer(999L, 1L, new BigDecimal("100.00"), key));
 
         assertEquals("Wallet not found: 999", exception.getMessage());
         verify(walletRepository).findByIdForUpdate(1L);
@@ -401,7 +459,10 @@ class WalletServiceTest {
 
     @Test
     void transferShouldThrowWhenDestinationWalletNotFound() {
+        UUID key = UUID.randomUUID();
         Wallet wallet = new Wallet();
+
+        executeOperation(key, TransactionType.TRANSFER, 1L, 999L, new BigDecimal("100.00"));
 
         when(walletRepository.findByIdForUpdate(999L))
                 .thenReturn((Optional.empty()));
@@ -409,7 +470,7 @@ class WalletServiceTest {
                 .thenReturn((Optional.of(wallet)));
 
         WalletNotFoundException exception = assertThrows(WalletNotFoundException.class,
-                () -> walletService.transfer(1L, 999L, new BigDecimal("100.00")));
+                () -> walletService.transfer(1L, 999L, new BigDecimal("100.00"), key));
 
         assertEquals("Wallet not found: 999", exception.getMessage());
         verify(walletRepository).findByIdForUpdate(1L);
@@ -420,9 +481,10 @@ class WalletServiceTest {
 
     @Test
     void transferShouldThrowWhenWalletsAreSame() {
+        UUID key = UUID.randomUUID();
 
         SelfTransferException exception = assertThrows(SelfTransferException.class,
-                () -> walletService.transfer(1L, 1L, new BigDecimal("100.00")));
+                () -> walletService.transfer(1L, 1L, new BigDecimal("100.00"), key));
 
         assertEquals("Cannot transfer to the same wallet: 1", exception.getMessage());
         verify(walletRepository, never()).findByIdForUpdate(1L);
@@ -433,9 +495,10 @@ class WalletServiceTest {
     @ParameterizedTest
     @ValueSource(strings = { "0.00", "-0.01", "-100" })
     void transferShouldThrowWhenAmountIsNotPositive(String value) {
+        UUID key = UUID.randomUUID();
 
         InvalidAmountException exception = assertThrows(InvalidAmountException.class,
-                () -> walletService.transfer(1L, 2L, new BigDecimal(value)));
+                () -> walletService.transfer(1L, 2L, new BigDecimal(value), key));
 
         assertEquals("Amount must be at least 0.01", exception.getMessage());
         verify(walletRepository, never()).findByIdForUpdate(1L);
@@ -446,9 +509,10 @@ class WalletServiceTest {
 
     @Test
     void transferShouldThrowWhenAmountIsNull() {
+        UUID key = UUID.randomUUID();
         InvalidAmountException exception = assertThrows(
                 InvalidAmountException.class,
-                () -> walletService.transfer(1L, 2L, null));
+                () -> walletService.transfer(1L, 2L, null, key));
 
         assertEquals("Amount must not be null", exception.getMessage());
 
@@ -459,9 +523,10 @@ class WalletServiceTest {
 
     @Test
     void transferShouldThrowWhenAmountHasMoreThanTwoSignificantDecimalPlaces() {
+        UUID key = UUID.randomUUID();
         InvalidAmountException exception = assertThrows(
                 InvalidAmountException.class,
-                () -> walletService.transfer(1L, 2L, new BigDecimal("10.001")));
+                () -> walletService.transfer(1L, 2L, new BigDecimal("10.001"), key));
 
         assertEquals("Amount must not have fractions of a cent", exception.getMessage());
 
@@ -472,9 +537,12 @@ class WalletServiceTest {
 
     @Test
     void transferShouldThrowWhenBalanceIsInsufficient() {
+        UUID key = UUID.randomUUID();
         Wallet wallet = new Wallet();
         Wallet wallet2 = new Wallet();
         wallet.deposit(new BigDecimal("100.00"));
+
+        executeOperation(key, TransactionType.TRANSFER, 1L, 2L, new BigDecimal("500.00"));
 
         when(walletRepository.findByIdForUpdate(1L))
                 .thenReturn(Optional.of(wallet));
@@ -482,7 +550,7 @@ class WalletServiceTest {
                 .thenReturn(Optional.of(wallet2));
 
         InsufficientBalanceException exception = assertThrows(InsufficientBalanceException.class,
-                () -> walletService.transfer(1L, 2L, new BigDecimal("500.00")));
+                () -> walletService.transfer(1L, 2L, new BigDecimal("500.00"), key));
 
         assertEquals("Insufficient balance", exception.getMessage());
         assertThat(wallet.getBalance())
@@ -495,21 +563,24 @@ class WalletServiceTest {
     }
 
     @Test
-    void transferShouldAllowTransferringEntireBalance() {
-        Wallet wallet = new Wallet();
+    void transferShouldAllowTransferringEntireBalance() throws Exception {
+        UUID key = UUID.randomUUID();
+        Wallet wallet = new Wallet(new User("Ivan", "ivan@example.com"));
         wallet.deposit(new BigDecimal("100.00"));
-        Wallet wallet2 = new Wallet();
+        Wallet wallet2 = new Wallet(new User("Ivan", "ivan@example.com"));
+
+        executeOperation(key, TransactionType.TRANSFER, 1L, 2L, new BigDecimal("100.00"));
 
         when(walletRepository.findByIdForUpdate(1L))
                 .thenReturn(Optional.of(wallet));
         when(walletRepository.findByIdForUpdate(2L))
                 .thenReturn(Optional.of(wallet2));
 
-        Wallet result = walletService.transfer(1L, 2L, new BigDecimal("100.00"));
+        IdempotencyResponse result = walletService.transfer(1L, 2L, new BigDecimal("100.00"), key);
 
         assertThat(wallet.getBalance()).isEqualByComparingTo("0.00");
         assertThat(wallet2.getBalance()).isEqualByComparingTo("100.00");
-        assertSame(wallet, result);
+        assertResponseBalance(result, "0.00");
         verify(walletRepository).save(wallet);
         verify(walletRepository).save(wallet2);
         verify(transactionRepository).save(any(Transaction.class));

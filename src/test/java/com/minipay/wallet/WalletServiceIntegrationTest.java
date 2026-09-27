@@ -2,6 +2,7 @@ package com.minipay.wallet;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -60,7 +61,8 @@ class WalletServiceIntegrationTest {
 
     @Test
     void depositShouldPersistBalanceAndTransaction() {
-        walletService.deposit(wallet.getId(), new BigDecimal("100.00"));
+        UUID key = UUID.randomUUID();
+        walletService.deposit(wallet.getId(), new BigDecimal("100.00"), key);
 
         entityManager.flush();
         entityManager.clear();
@@ -88,6 +90,7 @@ class WalletServiceIntegrationTest {
 
     @Test
     void transferShouldPersistBalancesAndTransaction() {
+        UUID key = UUID.randomUUID();
         wallet.deposit(new BigDecimal("300.00"));
         walletRepository.saveAndFlush(wallet);
 
@@ -99,7 +102,7 @@ class WalletServiceIntegrationTest {
         Long fromWalletId = wallet.getId();
         Long toWalletId = toWallet.getId();
 
-        walletService.transfer(fromWalletId, toWalletId, new BigDecimal("100.00"));
+        walletService.transfer(fromWalletId, toWalletId, new BigDecimal("100.00"), key);
 
         entityManager.flush();
         entityManager.clear();

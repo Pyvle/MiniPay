@@ -3,6 +3,7 @@ package com.minipay.wallet;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import java.math.BigDecimal;
+import java.util.UUID;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -36,6 +37,7 @@ class WalletTransferLimitIntegrationTest {
 
     @Test
     void transferShouldRollbackWhenRecipientBalanceLimitIsExceeded() {
+        UUID key = UUID.randomUUID();
         User savedFromUser = userRepository.saveAndFlush(
                 new User("Ivan", "ivan@example.com"));
         User savedToUser = userRepository.saveAndFlush(
@@ -54,7 +56,7 @@ class WalletTransferLimitIntegrationTest {
         Long transferCount = transactionRepository.count();
 
         assertThrows(BalanceLimitExceededException.class, 
-            () -> walletService.transfer(fromWalletId, toWalletId, new BigDecimal("0.01")));
+            () -> walletService.transfer(fromWalletId, toWalletId, new BigDecimal("0.01"), key));
 
         Wallet persistedFromWallet = 
             walletRepository.findById(fromWalletId).orElseThrow();

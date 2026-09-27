@@ -10,8 +10,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.hamcrest.Matchers.containsString;
 
+import com.minipay.idempotency.IdempotencyResponse;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -22,6 +25,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import com.minipay.common.exception.BalanceLimitExceededException;
+import com.minipay.common.exception.IdempotencyConflictException;
 import com.minipay.common.exception.InsufficientBalanceException;
 import com.minipay.common.exception.InvalidAmountException;
 import com.minipay.common.exception.SelfTransferException;
@@ -209,21 +213,17 @@ class WalletControllerTest {
 
     @Test
     void depositShouldReturnUpdatedWallet() throws Exception {
-        User user = mock(User.class);
-        Wallet wallet = mock(Wallet.class);
+        UUID key = UUID.randomUUID();
 
-        when(user.getId()).thenReturn(1L);
-        when(user.getName()).thenReturn("John Doe");
-        when(user.getEmail()).thenReturn("john@example.com");
+        String json = """
+                {"id":10,"userId":1,"userName":"John Doe","userEmail":"john@example.com","balance":100.00,"createdAt":null}
+                """;
 
-        when(wallet.getId()).thenReturn(10L);
-        when(wallet.getUser()).thenReturn(user);
-        when(wallet.getBalance()).thenReturn(new BigDecimal("100.00"));
-
-        when(walletService.deposit(10L, new BigDecimal("100.00")))
-                .thenReturn(wallet);
+        when(walletService.deposit(10L, new BigDecimal("100.00"), key))
+                .thenReturn(new IdempotencyResponse(200, json));
 
         mockMvc.perform(post("/api/wallets/{id}/deposit", 10L)
+                .header("Idempotency-Key", key.toString())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
                         {
@@ -231,16 +231,21 @@ class WalletControllerTest {
                         }
                         """))
                 .andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                .andExpect(content().string(json))
                 .andExpect(jsonPath("$.id").value(10))
                 .andExpect(jsonPath("$.balance").value(100.00));
 
         verify(walletService)
-                .deposit(10L, new BigDecimal("100.00"));
+                .deposit(10L, new BigDecimal("100.00"), key);
     }
 
     @Test
     void depositShouldReturnBadRequestWhenAmountIsInvalid() throws Exception {
+        UUID key = UUID.randomUUID();
+
         mockMvc.perform(post("/api/wallets/{id}/deposit", 10L)
+                .header("Idempotency-Key", key.toString())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
                         {
@@ -256,10 +261,12 @@ class WalletControllerTest {
 
     @Test
     void depositShouldReturnNotFoundWhenServiceThrows() throws Exception {
-        when(walletService.deposit(999L, new BigDecimal("100.00")))
+        UUID key = UUID.randomUUID();
+        when(walletService.deposit(999L, new BigDecimal("100.00"), key))
                 .thenThrow(new WalletNotFoundException(999L));
 
         mockMvc.perform(post("/api/wallets/{id}/deposit", 999L)
+                .header("Idempotency-Key", key.toString())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
                         {
@@ -270,12 +277,15 @@ class WalletControllerTest {
                 .andExpect(jsonPath("$.message").value("Wallet not found: 999"));
 
         verify(walletService)
-                .deposit(999L, new BigDecimal("100.00"));
+                .deposit(999L, new BigDecimal("100.00"), key);
     }
 
     @Test
     void depositShouldReturnBadRequestWhenAmountIsMissing() throws Exception {
+        UUID key = UUID.randomUUID();
+
         mockMvc.perform(post("/api/wallets/{id}/deposit", 10L)
+                .header("Idempotency-Key", key.toString())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
                         {}
@@ -288,13 +298,46 @@ class WalletControllerTest {
     }
 
     @Test
+    void depositShouldReturnBadRequestWhenIdempotencyKeyIsMissing() throws Exception {
+        mockMvc.perform(post("/api/wallets/{id}/deposit", 10L)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                        {
+                          "amount": 100.00
+                        }
+                        """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value(
+                        "Missing required header: Idempotency-Key"));
+
+        verifyNoInteractions(walletService);
+    }
+
+    @Test
+    void depositShouldReturnBadRequestWhenIdempotencyKeyIsInvalid() throws Exception {
+        mockMvc.perform(post("/api/wallets/{id}/deposit", 10L)
+                .header("Idempotency-Key", "not-a-uuid")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                        {
+                          "amount": 100.00
+                        }
+                        """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Invalid request parameter"));
+
+        verifyNoInteractions(walletService);
+    }
+
+    @Test
     void depositShouldReturnBadRequestWhenServiceThrowsInvalidAmountException()
             throws Exception {
-
-        when(walletService.deposit(10L, new BigDecimal("500.00")))
+        UUID key = UUID.randomUUID();
+        when(walletService.deposit(10L, new BigDecimal("500.00"), key))
                 .thenThrow(new InvalidAmountException());
 
         mockMvc.perform(post("/api/wallets/{id}/deposit", 10L)
+                .header("Idempotency-Key", key.toString())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
                         {
@@ -309,11 +352,12 @@ class WalletControllerTest {
     @Test
     void depositShouldReturnConflictWhenServiceThrowsBalanceLimitExceededException()
             throws Exception {
-
-        when(walletService.deposit(10L, new BigDecimal("0.01")))
+        UUID key = UUID.randomUUID();
+        when(walletService.deposit(10L, new BigDecimal("0.01"), key))
                 .thenThrow(new BalanceLimitExceededException());
 
         mockMvc.perform(post("/api/wallets/{id}/deposit", 10L)
+                .header("Idempotency-Key", key.toString())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
                         {
@@ -327,21 +371,16 @@ class WalletControllerTest {
 
     @Test
     void withdrawShouldReturnUpdatedWallet() throws Exception {
-        User user = mock(User.class);
-        Wallet wallet = mock(Wallet.class);
+        UUID key = UUID.randomUUID();
+        String json = """
+                {"id":10,"userId":1,"userName":"John Doe","userEmail":"john@example.com","balance":50.00,"createdAt":null}
+                """;
 
-        when(user.getId()).thenReturn(1L);
-        when(user.getName()).thenReturn("John Doe");
-        when(user.getEmail()).thenReturn("john@example.com");
-
-        when(wallet.getId()).thenReturn(10L);
-        when(wallet.getUser()).thenReturn(user);
-        when(wallet.getBalance()).thenReturn(new BigDecimal("50.00"));
-
-        when(walletService.withdraw(10L, new BigDecimal("50.00")))
-                .thenReturn(wallet);
+        when(walletService.withdraw(10L, new BigDecimal("50.00"), key))
+                .thenReturn(new IdempotencyResponse(200, json));
 
         mockMvc.perform(post("/api/wallets/{id}/withdraw", 10L)
+                .header("Idempotency-Key", key.toString())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
                         {
@@ -349,16 +388,20 @@ class WalletControllerTest {
                         }
                         """))
                 .andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                .andExpect(content().string(json))
                 .andExpect(jsonPath("$.id").value(10))
                 .andExpect(jsonPath("$.balance").value(50.00));
 
         verify(walletService)
-                .withdraw(10L, new BigDecimal("50.00"));
+                .withdraw(10L, new BigDecimal("50.00"), key);
     }
 
     @Test
     void withdrawShouldReturnBadRequestWhenAmountIsInvalid() throws Exception {
+        UUID key = UUID.randomUUID();
         mockMvc.perform(post("/api/wallets/{id}/withdraw", 10L)
+                .header("Idempotency-Key", key.toString())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
                         {
@@ -375,11 +418,13 @@ class WalletControllerTest {
     @Test
     void withdrawShouldReturnBadRequestWhenBalanceIsInsufficient()
             throws Exception {
+        UUID key = UUID.randomUUID();
 
-        when(walletService.withdraw(10L, new BigDecimal("500.00")))
+        when(walletService.withdraw(10L, new BigDecimal("500.00"), key))
                 .thenThrow(new InsufficientBalanceException());
 
         mockMvc.perform(post("/api/wallets/{id}/withdraw", 10L)
+                .header("Idempotency-Key", key.toString())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
                         {
@@ -391,28 +436,55 @@ class WalletControllerTest {
                         .value("Insufficient balance"));
 
         verify(walletService)
-                .withdraw(10L, new BigDecimal("500.00"));
+                .withdraw(10L, new BigDecimal("500.00"), key);
+    }
+
+    @Test
+    void withdrawShouldReturnBadRequestWhenIdempotencyKeyIsMissing() throws Exception {
+        mockMvc.perform(post("/api/wallets/{id}/withdraw", 10L)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                        {
+                          "amount": 50.00
+                        }
+                        """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value(
+                        "Missing required header: Idempotency-Key"));
+
+        verifyNoInteractions(walletService);
+    }
+
+    @Test
+    void withdrawShouldReturnBadRequestWhenIdempotencyKeyIsInvalid() throws Exception {
+        mockMvc.perform(post("/api/wallets/{id}/withdraw", 10L)
+                .header("Idempotency-Key", "not-a-uuid")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                        {
+                          "amount": 50.00
+                        }
+                        """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Invalid request parameter"));
+
+        verifyNoInteractions(walletService);
     }
 
     @Test
     void transferShouldReturnUpdatedSourceWallet() throws Exception {
-        User user = mock(User.class);
-        Wallet sourceWallet = mock(Wallet.class);
-
-        when(user.getId()).thenReturn(1L);
-        when(user.getName()).thenReturn("John Doe");
-        when(user.getEmail()).thenReturn("john@example.com");
-
-        when(sourceWallet.getId()).thenReturn(10L);
-        when(sourceWallet.getUser()).thenReturn(user);
-        when(sourceWallet.getBalance()).thenReturn(new BigDecimal("50.00"));
+        UUID key = UUID.randomUUID();
+        String json = """
+                {"id":10,"userId":1,"userName":"John Doe","userEmail":"john@example.com","balance":50.00,"createdAt":null}
+                """;
 
         when(walletService.transfer(
                 10L,
                 20L,
-                new BigDecimal("50.00"))).thenReturn(sourceWallet);
+                new BigDecimal("50.00"), key)).thenReturn(new IdempotencyResponse(200, json));
 
         mockMvc.perform(post("/api/wallets/{fromWalletId}/transfer", 10L)
+                .header("Idempotency-Key", key.toString())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
                         {
@@ -421,18 +493,22 @@ class WalletControllerTest {
                         }
                         """))
                 .andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                .andExpect(content().string(json))
                 .andExpect(jsonPath("$.id").value(10))
                 .andExpect(jsonPath("$.balance").value(50.00));
 
         verify(walletService).transfer(
                 10L,
                 20L,
-                new BigDecimal("50.00"));
+                new BigDecimal("50.00"), key);
     }
 
     @Test
     void transferShouldReturnBadRequestWhenAmountIsInvalid() throws Exception {
+        UUID key = UUID.randomUUID();
         mockMvc.perform(post("/api/wallets/{fromWalletId}/transfer", 10L)
+                .header("Idempotency-Key", key.toString())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
                         {
@@ -450,8 +526,10 @@ class WalletControllerTest {
     @Test
     void transferShouldReturnBadRequestWhenToWalletIdIsMissing()
             throws Exception {
+        UUID key = UUID.randomUUID();
 
         mockMvc.perform(post("/api/wallets/{fromWalletId}/transfer", 10L)
+                .header("Idempotency-Key", key.toString())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
                         {
@@ -468,13 +546,15 @@ class WalletControllerTest {
     @Test
     void transferShouldReturnBadRequestWhenWalletsAreSame()
             throws Exception {
+        UUID key = UUID.randomUUID();
 
         when(walletService.transfer(
                 10L,
                 10L,
-                new BigDecimal("50.00"))).thenThrow(new SelfTransferException(10L));
+                new BigDecimal("50.00"), key)).thenThrow(new SelfTransferException(10L));
 
         mockMvc.perform(post("/api/wallets/{fromWalletId}/transfer", 10L)
+                .header("Idempotency-Key", key.toString())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
                         {
@@ -489,19 +569,21 @@ class WalletControllerTest {
         verify(walletService).transfer(
                 10L,
                 10L,
-                new BigDecimal("50.00"));
+                new BigDecimal("50.00"), key);
     }
 
     @Test
     void transferShouldReturnBadRequestWhenBalanceIsInsufficient()
             throws Exception {
+        UUID key = UUID.randomUUID();
 
         when(walletService.transfer(
                 10L,
                 20L,
-                new BigDecimal("500.00"))).thenThrow(new InsufficientBalanceException());
+                new BigDecimal("500.00"), key)).thenThrow(new InsufficientBalanceException());
 
         mockMvc.perform(post("/api/wallets/{fromWalletId}/transfer", 10L)
+                .header("Idempotency-Key", key.toString())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
                         {
@@ -516,14 +598,16 @@ class WalletControllerTest {
         verify(walletService).transfer(
                 10L,
                 20L,
-                new BigDecimal("500.00"));
+                new BigDecimal("500.00"), key);
     }
 
     @Test
     void transferShouldReturnBadRequestWhenAmountIsMissing()
             throws Exception {
+        UUID key = UUID.randomUUID();
 
         mockMvc.perform(post("/api/wallets/{fromWalletId}/transfer", 10L)
+                .header("Idempotency-Key", key.toString())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
                         {
@@ -533,6 +617,40 @@ class WalletControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message")
                         .value(containsString("amount:")));
+
+        verifyNoInteractions(walletService);
+    }
+
+    @Test
+    void transferShouldReturnBadRequestWhenIdempotencyKeyIsMissing() throws Exception {
+        mockMvc.perform(post("/api/wallets/{fromWalletId}/transfer", 10L)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                        {
+                          "toWalletId": 20,
+                          "amount": 50.00
+                        }
+                        """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value(
+                        "Missing required header: Idempotency-Key"));
+
+        verifyNoInteractions(walletService);
+    }
+
+    @Test
+    void transferShouldReturnBadRequestWhenIdempotencyKeyIsInvalid() throws Exception {
+        mockMvc.perform(post("/api/wallets/{fromWalletId}/transfer", 10L)
+                .header("Idempotency-Key", "not-a-uuid")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                        {
+                          "toWalletId": 20,
+                          "amount": 50.00
+                        }
+                        """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Invalid request parameter"));
 
         verifyNoInteractions(walletService);
     }
@@ -598,12 +716,13 @@ class WalletControllerTest {
     @Test
     void depositShouldReturnConflictWhenWalletLockCannotBeAcquired()
             throws Exception {
-
-        when(walletService.deposit(10L, new BigDecimal("20.00")))
+                UUID key = UUID.randomUUID();
+        when(walletService.deposit(10L, new BigDecimal("20.00"), key))
                 .thenThrow(new CannotAcquireLockException(
                         "Technical database details"));
 
         mockMvc.perform(post("/api/wallets/{id}/deposit", 10L)
+        .header("Idempotency-Key", key.toString())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
                         {
@@ -617,7 +736,34 @@ class WalletControllerTest {
                         "Operation conflicted with another request. Please try again."))
                 .andExpect(jsonPath("$.path").value("/api/wallets/10/deposit"));
 
-        verify(walletService).deposit(10L, new BigDecimal("20.00"));
+        verify(walletService).deposit(10L, new BigDecimal("20.00"), key);
+    }
+
+    @Test
+    void depositShouldReturnConflictWhenIdempotencyKeyIsReusedWithDifferentParameters()
+            throws Exception {
+        UUID key = UUID.randomUUID();
+        String message = "Idempotency key has already been used with different request parameters";
+
+        when(walletService.deposit(10L, new BigDecimal("20.00"), key))
+                .thenThrow(new IdempotencyConflictException(message));
+
+        mockMvc.perform(post("/api/wallets/{id}/deposit", 10L)
+                .header("Idempotency-Key", key.toString())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                        {
+                          "amount": 20.00
+                        }
+                        """))
+                .andExpect(status().isConflict())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$.status").value(409))
+                .andExpect(jsonPath("$.error").value("Conflict"))
+                .andExpect(jsonPath("$.message").value(message))
+                .andExpect(jsonPath("$.path").value("/api/wallets/10/deposit"));
+
+        verify(walletService).deposit(10L, new BigDecimal("20.00"), key);
     }
 
 }

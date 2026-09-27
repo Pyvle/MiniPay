@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.math.BigDecimal;
 import java.sql.SQLException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -28,6 +29,13 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import com.minipay.common.exception.InsufficientBalanceException;
+import com.minipay.common.exception.BalanceLimitExceededException;
+import com.minipay.idempotency.IdempotencyRecordRepository;
+import com.minipay.idempotency.IdempotencyStatus;
+import com.minipay.transaction.TransactionStatus;
+import com.minipay.common.exception.IdempotencyConflictException;
+import com.minipay.idempotency.IdempotencyResponse;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.minipay.support.PostgresTestConfiguration;
 import com.minipay.transaction.Transaction;
 import com.minipay.transaction.TransactionRepository;
@@ -52,8 +60,18 @@ class WalletConcurrencyIntegrationTest {
     @Autowired
     private TransactionRepository transactionRepository;
 
+    @Autowired
+    private IdempotencyRecordRepository idempotencyRecordRepository;
+
+    private final List<UUID> usedKeys = new ArrayList<>();
+
     private Wallet wallet;
     private Wallet secondWallet;
+    private Wallet thirdWallet;
+
+    @Autowired
+    private ObjectMapper objectMapper;
+    UUID key;
 
     @Autowired
     private PlatformTransactionManager transactionManager;
@@ -76,14 +94,25 @@ class WalletConcurrencyIntegrationTest {
         secondWallet = new Wallet(secondUser);
         secondWallet.deposit(new BigDecimal("100.00"));
         walletRepository.saveAndFlush(secondWallet);
+
+        key = newRequestKey();
     }
 
     @AfterEach
     void tearDown() {
         transactionTemplate.executeWithoutResult(status -> {
+            idempotencyRecordRepository.deleteAllById(usedKeys);
             deleteWalletTestData(wallet);
             deleteWalletTestData(secondWallet);
+            deleteWalletTestData(thirdWallet);
         });
+        assertThat(idempotencyRecordRepository.findAllById(usedKeys)).isEmpty();
+    }
+
+    private UUID newRequestKey() {
+        UUID requestKey = UUID.randomUUID();
+        usedKeys.add(requestKey);
+        return requestKey;
     }
 
     private void deleteWalletTestData(Wallet testWallet) {
@@ -103,21 +132,47 @@ class WalletConcurrencyIntegrationTest {
     }
 
     @Test
+    void repeatedDepositWithSameKeyShouldExecuteOnlyOnce() {
+        Long walletId = wallet.getId();
+        UUID key = newRequestKey();
+
+        IdempotencyResponse firstResponse = walletService.deposit(walletId, new BigDecimal("20.00"), key);
+        IdempotencyResponse repeatedResponse = walletService.deposit(walletId, new BigDecimal("20.00"), key);
+
+        assertThat(repeatedResponse).isEqualTo(firstResponse);
+
+        Wallet persistedWallet = walletRepository.findById(walletId).orElseThrow();
+        assertThat(persistedWallet.getBalance())
+                .isEqualByComparingTo(new BigDecimal("120.00"));
+
+        List<Transaction> transactions = transactionRepository
+                .findAllByFromWalletIdOrToWalletIdOrderByCreatedAtDesc(walletId, walletId);
+
+        assertThat(transactions).hasSize(1);
+        Transaction transaction = transactions.get(0);
+        assertThat(transaction.getType()).isEqualTo(TransactionType.DEPOSIT);
+        assertThat(transaction.getAmount())
+                .isEqualByComparingTo(new BigDecimal("20.00"));
+    }
+
+    @Test
     void concurrentDepositsShouldPreserveBothAmounts() throws Exception {
         Long walletId = wallet.getId();
+        UUID firstKey = newRequestKey();
+        UUID secondKey = newRequestKey();
         CountDownLatch ready = new CountDownLatch(2);
 
         try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
             Future<?> firstTask = executor.submit(() -> {
                 ready.countDown();
                 awaitBothTasksReady(ready);
-                walletService.deposit(walletId, new BigDecimal("20.00"));
+                walletService.deposit(walletId, new BigDecimal("20.00"), firstKey);
             });
 
             Future<?> secondTask = executor.submit(() -> {
                 ready.countDown();
                 awaitBothTasksReady(ready);
-                walletService.deposit(walletId, new BigDecimal("30.00"));
+                walletService.deposit(walletId, new BigDecimal("30.00"), secondKey);
             });
 
             firstTask.get(10, TimeUnit.SECONDS);
@@ -142,6 +197,8 @@ class WalletConcurrencyIntegrationTest {
     @Test
     void concurrentWithdrawalsShouldNotOverdrawWallet() throws Exception {
         Long walletId = wallet.getId();
+        UUID firstKey = newRequestKey();
+        UUID secondKey = newRequestKey();
         CountDownLatch ready = new CountDownLatch(2);
 
         try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
@@ -150,7 +207,7 @@ class WalletConcurrencyIntegrationTest {
                 awaitBothTasksReady(ready);
 
                 try {
-                    walletService.withdraw(walletId, new BigDecimal("80.00"));
+                    walletService.withdraw(walletId, new BigDecimal("80.00"), firstKey);
                     return true;
                 } catch (InsufficientBalanceException e) {
                     return false;
@@ -162,7 +219,7 @@ class WalletConcurrencyIntegrationTest {
                 awaitBothTasksReady(ready);
 
                 try {
-                    walletService.withdraw(walletId, new BigDecimal("80.00"));
+                    walletService.withdraw(walletId, new BigDecimal("80.00"), secondKey);
                     return true;
                 } catch (InsufficientBalanceException e) {
                     return false;
@@ -197,19 +254,21 @@ class WalletConcurrencyIntegrationTest {
     void concurrentOppositeTransfersShouldPreserveBalances() throws Exception {
         Long walletId = wallet.getId();
         Long secondWalletId = secondWallet.getId();
+        UUID firstKey = newRequestKey();
+        UUID secondKey = newRequestKey();
         CountDownLatch ready = new CountDownLatch(2);
 
         try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
             Future<?> firstTask = executor.submit(() -> {
                 ready.countDown();
                 awaitBothTasksReady(ready);
-                walletService.transfer(walletId, secondWalletId, new BigDecimal("30.00"));
+                walletService.transfer(walletId, secondWalletId, new BigDecimal("30.00"), firstKey);
             });
 
             Future<?> secondTask = executor.submit(() -> {
                 ready.countDown();
                 awaitBothTasksReady(ready);
-                walletService.transfer(secondWalletId, walletId, new BigDecimal("20.00"));
+                walletService.transfer(secondWalletId, walletId, new BigDecimal("20.00"), secondKey);
             });
 
             firstTask.get(10, TimeUnit.SECONDS);
@@ -279,6 +338,7 @@ class WalletConcurrencyIntegrationTest {
 
     @Test
     void transferShouldRollbackWhenSecondWalletLockTimesOut() {
+        UUID key = newRequestKey();
         Long firstId = Math.min(wallet.getId(), secondWallet.getId());
         Long secondId = Math.max(wallet.getId(), secondWallet.getId());
 
@@ -288,7 +348,7 @@ class WalletConcurrencyIntegrationTest {
                 walletRepository.findByIdForUpdate(secondId).orElseThrow();
 
                 Future<?> transferTask = executor.submit(() -> {
-                    walletService.transfer(firstId, secondId, new BigDecimal("20.00"));
+                    walletService.transfer(firstId, secondId, new BigDecimal("20.00"), key);
                 });
 
                 ExecutionException exception = assertThrows(
@@ -311,6 +371,11 @@ class WalletConcurrencyIntegrationTest {
                 });
 
                 assertDoesNotThrow(() -> lockCheck.get(10, TimeUnit.SECONDS));
+                assertThat(idempotencyRecordRepository.findById(key)).isEmpty();
+                assertBalance(wallet, "100.00");
+                assertBalance(secondWallet, "100.00");
+                assertThat(history(wallet)).isEmpty();
+                assertThat(history(secondWallet)).isEmpty();
             });
         }
 
@@ -328,6 +393,254 @@ class WalletConcurrencyIntegrationTest {
         assertThat(transactionRepository
                 .findAllByFromWalletIdOrToWalletIdOrderByCreatedAtDesc(secondId, secondId))
                 .isEmpty();
+
+        // executeWithoutResult has returned: the transaction holding the lock is finished.
+        IdempotencyResponse successfulResponse = walletService.transfer(
+                firstId, secondId, new BigDecimal("20.00"), key);
+        IdempotencyResponse repeatedResponse = walletService.transfer(
+                firstId, secondId, new BigDecimal("20.00"), key);
+        assertThat(repeatedResponse).isEqualTo(successfulResponse);
+        assertThat(walletRepository.findById(firstId).orElseThrow().getBalance())
+                .isEqualByComparingTo("80.00");
+        assertThat(walletRepository.findById(secondId).orElseThrow().getBalance())
+                .isEqualByComparingTo("120.00");
+        assertSingleOperation(wallet, TransactionType.TRANSFER, "20.00");
+        assertSingleOperation(secondWallet, TransactionType.TRANSFER, "20.00");
+        assertCompletedRequest(key, successfulResponse);
+    }
+
+    @Test
+    void repeatedWithdrawalWithSameKeyShouldExecuteOnlyOnce() {
+        IdempotencyResponse firstResponse = walletService.withdraw(wallet.getId(), new BigDecimal("20.00"), key);
+        IdempotencyResponse repeatedResponse = walletService.withdraw(wallet.getId(), new BigDecimal("20.00"), key);
+
+        assertThat(repeatedResponse).isEqualTo(firstResponse);
+        assertBalance(wallet, "80.00");
+        assertBalance(secondWallet, "100.00");
+        assertSingleOperation(wallet, TransactionType.WITHDRAWAL, "20.00");
+        assertThat(history(secondWallet)).isEmpty();
+    }
+
+    @Test
+    void repeatedTransferWithSameKeyShouldExecuteOnlyOnce() {
+        IdempotencyResponse firstResponse = walletService.transfer(
+                wallet.getId(), secondWallet.getId(), new BigDecimal("20.00"), key);
+        IdempotencyResponse repeatedResponse = walletService.transfer(
+                wallet.getId(), secondWallet.getId(), new BigDecimal("20.00"), key);
+
+        assertThat(repeatedResponse).isEqualTo(firstResponse);
+        assertBalance(wallet, "80.00");
+        assertBalance(secondWallet, "120.00");
+        assertSingleOperation(wallet, TransactionType.TRANSFER, "20.00");
+        assertSingleOperation(secondWallet, TransactionType.TRANSFER, "20.00");
+        assertThat(history(secondWallet).get(0).getId()).isEqualTo(history(wallet).get(0).getId());
+    }
+
+    @Test
+    void sameKeyWithDifferentAmountShouldConflictWithoutChangingState() {
+        walletService.deposit(wallet.getId(), new BigDecimal("20.00"), key);
+        Long originalTransactionId = history(wallet).get(0).getId();
+
+        assertThrows(IdempotencyConflictException.class,
+                () -> walletService.deposit(wallet.getId(), new BigDecimal("50.00"), key));
+
+        assertDepositStateUnchanged(originalTransactionId);
+    }
+
+    @Test
+    void sameKeyWithDifferentWalletShouldConflictWithoutChangingState() {
+        walletService.deposit(wallet.getId(), new BigDecimal("20.00"), key);
+        Long originalTransactionId = history(wallet).get(0).getId();
+
+        assertThrows(IdempotencyConflictException.class,
+                () -> walletService.deposit(secondWallet.getId(), new BigDecimal("20.00"), key));
+
+        assertDepositStateUnchanged(originalTransactionId);
+    }
+
+    @Test
+    void sameKeyWithDifferentRecipientShouldConflictWithoutChangingState() {
+        User thirdUser = userRepository.saveAndFlush(
+                new User("Petr", "petr-" + UUID.randomUUID() + "@example.com"));
+        thirdWallet = new Wallet(thirdUser);
+        thirdWallet.deposit(new BigDecimal("100.00"));
+        walletRepository.saveAndFlush(thirdWallet);
+
+        walletService.transfer(wallet.getId(), secondWallet.getId(), new BigDecimal("20.00"), key);
+        Long originalTransactionId = history(wallet).get(0).getId();
+
+        assertThrows(IdempotencyConflictException.class,
+                () -> walletService.transfer(wallet.getId(), thirdWallet.getId(), new BigDecimal("20.00"), key));
+
+        assertBalance(wallet, "80.00");
+        assertBalance(secondWallet, "120.00");
+        assertBalance(thirdWallet, "100.00");
+        assertSingleOperation(wallet, TransactionType.TRANSFER, "20.00");
+        assertSingleOperation(secondWallet, TransactionType.TRANSFER, "20.00");
+        assertThat(history(wallet).get(0).getId()).isEqualTo(originalTransactionId);
+        assertThat(history(secondWallet).get(0).getId()).isEqualTo(originalTransactionId);
+        assertThat(history(thirdWallet)).isEmpty();
+    }
+
+    @Test
+    void sameKeyWithDifferentOperationTypeShouldConflictWithoutChangingState() {
+        walletService.deposit(wallet.getId(), new BigDecimal("20.00"), key);
+        Long originalTransactionId = history(wallet).get(0).getId();
+
+        assertThrows(IdempotencyConflictException.class,
+                () -> walletService.withdraw(wallet.getId(), new BigDecimal("20.00"), key));
+
+        assertDepositStateUnchanged(originalTransactionId);
+    }
+
+    @Test
+    void repeatedRequestShouldReturnOriginalResponseAfterAnotherOperation() throws Exception {
+        IdempotencyResponse firstResponse = walletService.deposit(wallet.getId(), new BigDecimal("20.00"), key);
+        walletService.deposit(wallet.getId(), new BigDecimal("50.00"), newRequestKey());
+        IdempotencyResponse repeatedResponse = walletService.deposit(wallet.getId(), new BigDecimal("20.00"), key);
+
+        assertThat(repeatedResponse).isEqualTo(firstResponse);
+        assertThat(repeatedResponse.status()).isEqualTo(200);
+        assertThat(objectMapper.readTree(repeatedResponse.body()).get("balance").decimalValue())
+                .isEqualByComparingTo("120.00");
+        assertBalance(wallet, "170.00");
+        assertBalance(secondWallet, "100.00");
+        assertThat(history(wallet)).hasSize(2)
+                .allSatisfy(transaction -> assertThat(transaction.getType()).isEqualTo(TransactionType.DEPOSIT))
+                .extracting(Transaction::getAmount)
+                .containsExactlyInAnyOrder(new BigDecimal("20.00"), new BigDecimal("50.00"));
+        assertThat(history(secondWallet)).isEmpty();
+    }
+
+    @Test
+    void concurrentDepositsWithSameKeyShouldExecuteOnlyOnce() throws Exception {
+        Long walletId = wallet.getId();
+        UUID sameKey = key;
+        CountDownLatch ready = new CountDownLatch(2);
+
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            Future<IdempotencyResponse> firstTask = executor.submit(() -> {
+                ready.countDown();
+                awaitBothTasksReady(ready);
+                return walletService.deposit(walletId, new BigDecimal("20.00"), sameKey);
+            });
+            Future<IdempotencyResponse> secondTask = executor.submit(() -> {
+                ready.countDown();
+                awaitBothTasksReady(ready);
+                return walletService.deposit(walletId, new BigDecimal("20.00"), sameKey);
+            });
+
+            IdempotencyResponse firstResponse = firstTask.get(10, TimeUnit.SECONDS);
+            IdempotencyResponse repeatedResponse = secondTask.get(10, TimeUnit.SECONDS);
+            assertThat(repeatedResponse).isEqualTo(firstResponse);
+            assertThat(firstResponse.status()).isEqualTo(200);
+            assertThat(objectMapper.readTree(firstResponse.body()).get("balance").decimalValue())
+                    .isEqualByComparingTo("120.00");
+        }
+
+        assertBalance(wallet, "120.00");
+        assertBalance(secondWallet, "100.00");
+        assertSingleOperation(wallet, TransactionType.DEPOSIT, "20.00");
+        assertThat(history(secondWallet)).isEmpty();
+    }
+
+    @Test
+    void failedWithdrawalShouldRollbackKeyAndAllowRetryAfterDeposit() {
+        assertThrows(InsufficientBalanceException.class,
+                () -> walletService.withdraw(wallet.getId(), new BigDecimal("150.00"), key));
+
+        assertBalance(wallet, "100.00");
+        assertThat(history(wallet)).isEmpty();
+        assertThat(idempotencyRecordRepository.findById(key)).isEmpty();
+
+        walletService.deposit(wallet.getId(), new BigDecimal("100.00"), newRequestKey());
+        IdempotencyResponse successfulResponse = walletService.withdraw(
+                wallet.getId(), new BigDecimal("150.00"), key);
+        IdempotencyResponse repeatedResponse = walletService.withdraw(
+                wallet.getId(), new BigDecimal("150.00"), key);
+
+        assertThat(repeatedResponse).isEqualTo(successfulResponse);
+        assertBalance(wallet, "50.00");
+        assertBalance(secondWallet, "100.00");
+        assertThat(history(secondWallet)).isEmpty();
+        assertThat(history(wallet)).hasSize(2)
+                .allSatisfy(transaction -> assertThat(transaction.getStatus()).isEqualTo(TransactionStatus.SUCCESS));
+        assertThat(history(wallet)).filteredOn(transaction -> transaction.getType() == TransactionType.WITHDRAWAL)
+                .singleElement().satisfies(transaction ->
+                        assertThat(transaction.getAmount()).isEqualByComparingTo("150.00"));
+        assertCompletedRequest(key, successfulResponse);
+    }
+
+    @Test
+    void failedTransferShouldRollbackKeyAndAllowRetryAfterRecipientWithdrawal() {
+        // Same DECIMAL(19, 2) balance limit used by Wallet; fixture setup creates no financial operation.
+        BigDecimal maxBalance = new BigDecimal("99999999999999999.99");
+        transactionTemplate.executeWithoutResult(status -> {
+            Wallet recipient = walletRepository.findByIdForUpdate(secondWallet.getId()).orElseThrow();
+            recipient.deposit(maxBalance.subtract(recipient.getBalance()));
+        });
+
+        assertThrows(BalanceLimitExceededException.class,
+                () -> walletService.transfer(wallet.getId(), secondWallet.getId(), new BigDecimal("20.00"), key));
+
+        assertBalance(wallet, "100.00");
+        assertBalance(secondWallet, maxBalance.toPlainString());
+        assertThat(history(wallet)).isEmpty();
+        assertThat(history(secondWallet)).isEmpty();
+        assertThat(idempotencyRecordRepository.findById(key)).isEmpty();
+
+        walletService.withdraw(secondWallet.getId(), new BigDecimal("20.00"), newRequestKey());
+        IdempotencyResponse successfulResponse = walletService.transfer(
+                wallet.getId(), secondWallet.getId(), new BigDecimal("20.00"), key);
+        IdempotencyResponse repeatedResponse = walletService.transfer(
+                wallet.getId(), secondWallet.getId(), new BigDecimal("20.00"), key);
+
+        assertThat(repeatedResponse).isEqualTo(successfulResponse);
+        assertBalance(wallet, "80.00");
+        assertBalance(secondWallet, maxBalance.toPlainString());
+        assertSingleOperation(wallet, TransactionType.TRANSFER, "20.00");
+        assertThat(history(secondWallet)).hasSize(2)
+                .allSatisfy(transaction -> assertThat(transaction.getStatus()).isEqualTo(TransactionStatus.SUCCESS));
+        assertThat(history(secondWallet)).filteredOn(transaction -> transaction.getType() == TransactionType.TRANSFER)
+                .singleElement().satisfies(transaction -> {
+                    assertThat(transaction.getId()).isEqualTo(history(wallet).get(0).getId());
+                    assertThat(transaction.getAmount()).isEqualByComparingTo("20.00");
+                });
+        assertCompletedRequest(key, successfulResponse);
+    }
+
+    private List<Transaction> history(Wallet testWallet) {
+        Long walletId = testWallet.getId();
+        return transactionRepository.findAllByFromWalletIdOrToWalletIdOrderByCreatedAtDesc(walletId, walletId);
+    }
+
+    private void assertBalance(Wallet testWallet, String expectedBalance) {
+        assertThat(walletRepository.findById(testWallet.getId()).orElseThrow().getBalance())
+                .isEqualByComparingTo(expectedBalance);
+    }
+
+    private void assertSingleOperation(Wallet testWallet, TransactionType type, String amount) {
+        assertThat(history(testWallet)).singleElement().satisfies(transaction -> {
+            assertThat(transaction.getStatus()).isEqualTo(TransactionStatus.SUCCESS);
+            assertThat(transaction.getType()).isEqualTo(type);
+            assertThat(transaction.getAmount()).isEqualByComparingTo(amount);
+        });
+    }
+
+    private void assertCompletedRequest(UUID requestKey, IdempotencyResponse response) {
+        var record = idempotencyRecordRepository.findById(requestKey).orElseThrow();
+        assertThat(record.getStatus()).isEqualTo(IdempotencyStatus.COMPLETED);
+        assertThat(response.status()).isEqualTo(200);
+        assertThat(record.getResponseStatus()).isEqualTo(response.status());
+        assertThat(record.getResponseBody()).isEqualTo(response.body());
+    }
+
+    private void assertDepositStateUnchanged(Long originalTransactionId) {
+        assertBalance(wallet, "120.00");
+        assertBalance(secondWallet, "100.00");
+        assertSingleOperation(wallet, TransactionType.DEPOSIT, "20.00");
+        assertThat(history(wallet).get(0).getId()).isEqualTo(originalTransactionId);
+        assertThat(history(secondWallet)).isEmpty();
     }
 
     private void awaitBothTasksReady(CountDownLatch ready) {
