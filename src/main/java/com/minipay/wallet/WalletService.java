@@ -6,13 +6,13 @@ import java.util.UUID;
 import org.springframework.stereotype.Service;
 
 import com.minipay.user.UserRepository;
-import com.minipay.wallet.dto.WalletResponse;
 
 import jakarta.transaction.Transactional;
 
 import com.minipay.user.User;
 import com.minipay.transaction.TransactionRepository;
 import com.minipay.transaction.TransactionType;
+import com.minipay.transaction.dto.TransactionResponse;
 import com.minipay.common.exception.SelfTransferException;
 import com.minipay.common.exception.UserNotFoundException;
 import com.minipay.common.exception.WalletAlreadyExistsException;
@@ -76,7 +76,7 @@ public class WalletService {
                     walletRepository.save(wallet);
                     Transaction transaction = Transaction.deposit(wallet, amount);
                     transactionRepository.save(transaction);
-                    return new WalletResponse(wallet);
+                    return new TransactionResponse(transaction);
                 });
     }
 
@@ -96,7 +96,7 @@ public class WalletService {
                     walletRepository.save(wallet);
                     Transaction transaction = Transaction.withdraw(wallet, amount);
                     transactionRepository.save(transaction);
-                    return new WalletResponse(wallet);
+                    return new TransactionResponse(transaction);
                 });
     }
 
@@ -131,7 +131,7 @@ public class WalletService {
                     walletRepository.save(toWallet);
                     Transaction transaction = Transaction.transfer(fromWallet, toWallet, amount);
                     transactionRepository.save(transaction);
-                    return new WalletResponse(fromWallet);
+                    return new TransactionResponse(transaction);
                 });
     }
 

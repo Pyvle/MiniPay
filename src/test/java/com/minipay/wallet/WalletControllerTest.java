@@ -21,6 +21,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.dao.CannotAcquireLockException;
 import org.springframework.http.MediaType;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -34,11 +37,100 @@ import com.minipay.common.exception.WalletAlreadyExistsException;
 import com.minipay.common.exception.WalletNotFoundException;
 import com.minipay.transaction.Transaction;
 import com.minipay.transaction.TransactionService;
+import com.minipay.transaction.TransactionType;
+import com.minipay.transaction.TransactionStatus;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import com.minipay.transaction.dto.TransactionResponse;
 import com.minipay.user.User;
 
 @WebMvcTest(WalletController.class)
 class WalletControllerTest {
+
+    @Test
+    void historyShouldTreatEmptyFiltersAsAbsentAndExposeOnlyPublicPageFields() throws Exception {
+        when(transactionService.getTransactionsByWalletId(10L, null, null, 0, 20, null, null))
+                .thenReturn(Page.empty(PageRequest.of(0, 20)));
+        mockMvc.perform(get("/api/wallets/10/transactions")
+                .param("type", "").param("status", "").param("from", "").param("to", ""))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.*", org.hamcrest.Matchers.hasSize(5)))
+                .andExpect(jsonPath("$.content.length()").value(0))
+                .andExpect(jsonPath("$.page").value(0))
+                .andExpect(jsonPath("$.size").value(20))
+                .andExpect(jsonPath("$.totalElements").value(0))
+                .andExpect(jsonPath("$.totalPages").value(0));
+        verify(transactionService).getTransactionsByWalletId(10L, null, null, 0, 20, null, null);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"2026-09-01T00:00:00,2026-10-01T00:00:00", "2026-09-01T00:00:00,", ",2026-10-01T00:00:00"})
+    void historyShouldBindOptionalDates(String fromText, String toText) throws Exception {
+        var from = fromText == null ? null : java.time.LocalDateTime.parse(fromText);
+        var to = toText == null ? null : java.time.LocalDateTime.parse(toText);
+        when(transactionService.getTransactionsByWalletId(10L, TransactionType.TRANSFER,
+                TransactionStatus.SUCCESS, 0, 20, from, to)).thenReturn(Page.empty());
+        var request = get("/api/wallets/10/transactions")
+                .param("type", "TRANSFER").param("status", "SUCCESS");
+        if (fromText != null) request.param("from", fromText);
+        if (toText != null) request.param("to", toText);
+
+        mockMvc.perform(request).andExpect(status().isOk());
+        verify(transactionService).getTransactionsByWalletId(10L, TransactionType.TRANSFER,
+                TransactionStatus.SUCCESS, 0, 20, from, to);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"from,not-a-date", "to,2026-13-01T00:00:00"})
+    void historyShouldRejectMalformedDates(String parameter, String value) throws Exception {
+        mockMvc.perform(get("/api/wallets/10/transactions").param(parameter, value))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Invalid request parameter"));
+        verifyNoInteractions(transactionService);
+    }
+
+    @Test
+    void historyShouldReturnBadRequestForReversedDateRange() throws Exception {
+        var from = java.time.LocalDateTime.of(2026, 9, 28, 12, 0);
+        var to = from.minusDays(1);
+        when(transactionService.getTransactionsByWalletId(10L, null, null, 0, 20, from, to))
+                .thenThrow(new com.minipay.common.exception.InvalidDateRangeException());
+
+        mockMvc.perform(get("/api/wallets/10/transactions")
+                .param("from", from.toString()).param("to", to.toString()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.error").value("Bad Request"))
+                .andExpect(jsonPath("$.message").value("Start date must not be after end date"))
+                .andExpect(jsonPath("$.path").value("/api/wallets/10/transactions"));
+    }
+
+    @ParameterizedTest
+    @CsvSource({"TRANSFER,SUCCESS", "DEPOSIT,", ",FAILED", ","})
+    void historyShouldBindOptionalFilters(TransactionType type, TransactionStatus filterStatus) throws Exception {
+        when(transactionService.getTransactionsByWalletId(10L, type, filterStatus, 1, 2, null, null))
+                .thenReturn(Page.empty(PageRequest.of(1, 2)));
+        var request = get("/api/wallets/10/transactions").param("page", "1").param("size", "2");
+        if (type != null) request.param("type", type.name());
+        if (filterStatus != null) request.param("status", filterStatus.name());
+
+        mockMvc.perform(request)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(0));
+
+        verify(transactionService).getTransactionsByWalletId(10L, type, filterStatus, 1, 2, null, null);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"type,UNKNOWN", "status,UNKNOWN"})
+    void historyShouldRejectUnknownEnums(String parameter, String value) throws Exception {
+        mockMvc.perform(get("/api/wallets/10/transactions").param(parameter, value))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.message").value("Invalid request parameter"))
+                .andExpect(jsonPath("$.path").value("/api/wallets/10/transactions"));
+        verifyNoInteractions(transactionService);
+    }
 
     @Autowired
     private MockMvc mockMvc;
@@ -212,11 +304,11 @@ class WalletControllerTest {
     }
 
     @Test
-    void depositShouldReturnUpdatedWallet() throws Exception {
+    void depositShouldReturnTransaction() throws Exception {
         UUID key = UUID.randomUUID();
 
         String json = """
-                {"id":10,"userId":1,"userName":"John Doe","userEmail":"john@example.com","balance":100.00,"createdAt":null}
+                {"id":101,"fromWalletId":null,"toWalletId":10,"amount":100.00,"type":"DEPOSIT","status":"SUCCESS","createdAt":"2026-09-28T12:00:00"}
                 """;
 
         when(walletService.deposit(10L, new BigDecimal("100.00"), key))
@@ -233,8 +325,8 @@ class WalletControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
                 .andExpect(content().string(json))
-                .andExpect(jsonPath("$.id").value(10))
-                .andExpect(jsonPath("$.balance").value(100.00));
+                .andExpect(jsonPath("$.id").value(101))
+                .andExpect(jsonPath("$.amount").value(100.00));
 
         verify(walletService)
                 .deposit(10L, new BigDecimal("100.00"), key);
@@ -370,10 +462,10 @@ class WalletControllerTest {
     }
 
     @Test
-    void withdrawShouldReturnUpdatedWallet() throws Exception {
+    void withdrawShouldReturnTransaction() throws Exception {
         UUID key = UUID.randomUUID();
         String json = """
-                {"id":10,"userId":1,"userName":"John Doe","userEmail":"john@example.com","balance":50.00,"createdAt":null}
+                {"id":101,"fromWalletId":10,"toWalletId":null,"amount":50.00,"type":"WITHDRAWAL","status":"SUCCESS","createdAt":"2026-09-28T12:00:00"}
                 """;
 
         when(walletService.withdraw(10L, new BigDecimal("50.00"), key))
@@ -390,8 +482,8 @@ class WalletControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
                 .andExpect(content().string(json))
-                .andExpect(jsonPath("$.id").value(10))
-                .andExpect(jsonPath("$.balance").value(50.00));
+                .andExpect(jsonPath("$.id").value(101))
+                .andExpect(jsonPath("$.amount").value(50.00));
 
         verify(walletService)
                 .withdraw(10L, new BigDecimal("50.00"), key);
@@ -472,10 +564,10 @@ class WalletControllerTest {
     }
 
     @Test
-    void transferShouldReturnUpdatedSourceWallet() throws Exception {
+    void transferShouldReturnTransaction() throws Exception {
         UUID key = UUID.randomUUID();
         String json = """
-                {"id":10,"userId":1,"userName":"John Doe","userEmail":"john@example.com","balance":50.00,"createdAt":null}
+                {"id":101,"fromWalletId":10,"toWalletId":20,"amount":50.00,"type":"TRANSFER","status":"SUCCESS","createdAt":"2026-09-28T12:00:00"}
                 """;
 
         when(walletService.transfer(
@@ -495,8 +587,8 @@ class WalletControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
                 .andExpect(content().string(json))
-                .andExpect(jsonPath("$.id").value(10))
-                .andExpect(jsonPath("$.balance").value(50.00));
+                .andExpect(jsonPath("$.id").value(101))
+                .andExpect(jsonPath("$.amount").value(50.00));
 
         verify(walletService).transfer(
                 10L,
@@ -671,46 +763,70 @@ class WalletControllerTest {
                 new TransactionResponse(deposit),
                 new TransactionResponse(withdraw));
 
-        when(transactionService.getTransactionsByWalletId(10L))
-                .thenReturn(transactions);
+        when(transactionService.getTransactionsByWalletId(10L, null, null, 0, 20, null, null))
+                .thenReturn(new PageImpl<>(transactions, PageRequest.of(0, 20), 2));
 
         mockMvc.perform(get("/api/wallets/{id}/transactions", 10L))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(2))
-                .andExpect(jsonPath("$[0].amount").value(100.00))
-                .andExpect(jsonPath("$[0].type").value("DEPOSIT"))
-                .andExpect(jsonPath("$[0].status").value("SUCCESS"))
-                .andExpect(jsonPath("$[1].amount").value(40.00))
-                .andExpect(jsonPath("$[1].type").value("WITHDRAWAL"))
-                .andExpect(jsonPath("$[1].status").value("SUCCESS"));
+                .andExpect(jsonPath("$.content.length()").value(2))
+                .andExpect(jsonPath("$.page").value(0))
+                .andExpect(jsonPath("$.size").value(20))
+                .andExpect(jsonPath("$.totalElements").value(2))
+                .andExpect(jsonPath("$.totalPages").value(1))
+                .andExpect(jsonPath("$.content[0].amount").value(100.00))
+                .andExpect(jsonPath("$.content[0].type").value("DEPOSIT"))
+                .andExpect(jsonPath("$.content[0].status").value("SUCCESS"))
+                .andExpect(jsonPath("$.content[1].amount").value(40.00))
+                .andExpect(jsonPath("$.content[1].type").value("WITHDRAWAL"))
+                .andExpect(jsonPath("$.content[1].status").value("SUCCESS"));
 
-        verify(transactionService).getTransactionsByWalletId(10L);
+        verify(transactionService).getTransactionsByWalletId(10L, null, null, 0, 20, null, null);
     }
 
     @Test
     void getTransactionsShouldReturnEmptyList() throws Exception {
-        when(transactionService.getTransactionsByWalletId(10L))
-                .thenReturn(List.of());
+        when(transactionService.getTransactionsByWalletId(10L, null, null, 0, 20, null, null))
+                .thenReturn(Page.empty(PageRequest.of(0, 20)));
 
         mockMvc.perform(get("/api/wallets/{id}/transactions", 10L))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(0));
+                .andExpect(jsonPath("$.content.length()").value(0));
 
-        verify(transactionService).getTransactionsByWalletId(10L);
+        verify(transactionService).getTransactionsByWalletId(10L, null, null, 0, 20, null, null);
+    }
+
+    @Test
+    void getTransactionsShouldPassExplicitPageParameters() throws Exception {
+        TransactionResponse response = new TransactionResponse(
+                Transaction.deposit(new Wallet(), new BigDecimal("25.00")));
+        when(transactionService.getTransactionsByWalletId(10L, null, null, 1, 2, null, null))
+                .thenReturn(new PageImpl<>(List.of(response), PageRequest.of(1, 2), 3));
+
+        mockMvc.perform(get("/api/wallets/{id}/transactions", 10L)
+                .param("page", "1").param("size", "2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].amount").value(25.00))
+                .andExpect(jsonPath("$.page").value(1))
+                .andExpect(jsonPath("$.size").value(2))
+                .andExpect(jsonPath("$.totalElements").value(3))
+                .andExpect(jsonPath("$.totalPages").value(2));
+
+        verify(transactionService).getTransactionsByWalletId(10L, null, null, 1, 2, null, null);
     }
 
     @Test
     void getTransactionsShouldReturnNotFoundWhenWalletNotFound()
             throws Exception {
 
-        when(transactionService.getTransactionsByWalletId(999L))
+        when(transactionService.getTransactionsByWalletId(999L, null, null, 0, 20, null, null))
                 .thenThrow(new WalletNotFoundException(999L));
 
         mockMvc.perform(get("/api/wallets/{id}/transactions", 999L))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.message").value("Wallet not found: 999"));
 
-        verify(transactionService).getTransactionsByWalletId(999L);
+        verify(transactionService).getTransactionsByWalletId(999L, null, null, 0, 20, null, null);
     }
 
     @Test

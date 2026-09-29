@@ -19,7 +19,10 @@ import com.minipay.common.exception.EmailAlreadyExistsException;
 import com.minipay.common.exception.IdempotencyConflictException;
 import com.minipay.common.exception.InsufficientBalanceException;
 import com.minipay.common.exception.InvalidAmountException;
+import com.minipay.common.exception.InvalidDateRangeException;
+import com.minipay.common.exception.InvalidPageRequestException;
 import com.minipay.common.exception.SelfTransferException;
+import com.minipay.common.exception.TransactionNotFoundException;
 import com.minipay.common.exception.UserNotFoundException;
 import com.minipay.common.exception.WalletAlreadyExistsException;
 import com.minipay.common.exception.WalletNotFoundException;
@@ -28,6 +31,13 @@ import jakarta.servlet.http.HttpServletRequest;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    @ExceptionHandler(InvalidPageRequestException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public ErrorResponse handleInvalidPageRequest(InvalidPageRequestException exception, HttpServletRequest request) {
+        return new ErrorResponse(HttpStatus.BAD_REQUEST.value(), HttpStatus.BAD_REQUEST.getReasonPhrase(),
+                exception.getMessage(), request.getRequestURI());
+    }
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
@@ -260,12 +270,37 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(IdempotencyConflictException.class)
     @ResponseStatus(HttpStatus.CONFLICT)
     public ErrorResponse handleIdempotencyConflictException(
-        IdempotencyConflictException  exception,
+            IdempotencyConflictException exception,
             HttpServletRequest request) {
 
         return new ErrorResponse(
                 HttpStatus.CONFLICT.value(),
                 HttpStatus.CONFLICT.getReasonPhrase(),
+                exception.getMessage(),
+                request.getRequestURI());
+    }
+
+    @ExceptionHandler(TransactionNotFoundException.class)
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    public ErrorResponse handleTransactionNotFoundException(
+            TransactionNotFoundException exception,
+            HttpServletRequest request) {
+
+        return new ErrorResponse(
+                HttpStatus.NOT_FOUND.value(),
+                HttpStatus.NOT_FOUND.getReasonPhrase(),
+                exception.getMessage(),
+                request.getRequestURI());
+    }
+
+    @ExceptionHandler(InvalidDateRangeException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public ErrorResponse handleInvalidDateRangeException(
+            InvalidDateRangeException exception,
+            HttpServletRequest request) {
+        return new ErrorResponse(
+                HttpStatus.BAD_REQUEST.value(),
+                HttpStatus.BAD_REQUEST.getReasonPhrase(),
                 exception.getMessage(),
                 request.getRequestURI());
     }

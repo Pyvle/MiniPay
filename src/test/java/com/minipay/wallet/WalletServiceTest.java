@@ -19,7 +19,7 @@ import java.util.function.Supplier;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.minipay.idempotency.IdempotencyResponse;
 import com.minipay.idempotency.IdempotencyService;
-import com.minipay.wallet.dto.WalletResponse;
+import com.minipay.transaction.dto.TransactionResponse;
 import static org.mockito.ArgumentMatchers.eq;
 
 import org.junit.jupiter.api.Test;
@@ -67,16 +67,18 @@ class WalletServiceTest {
         when(idempotencyService.execute(eq(key), eq(type), eq(walletId),
                 eq(toWalletId), eq(amount), any()))
                 .thenAnswer(invocation -> {
-                    Supplier<WalletResponse> operation = invocation.getArgument(5);
+                    Supplier<TransactionResponse> operation = invocation.getArgument(5);
                     return new IdempotencyResponse(200,
                             objectMapper.writeValueAsString(operation.get()));
                 });
     }
 
-    private void assertResponseBalance(IdempotencyResponse response, String balance) throws Exception {
+    private void assertResponseTransaction(IdempotencyResponse response, TransactionType type, String amount) throws Exception {
         assertEquals(200, response.status());
-        assertThat(objectMapper.readTree(response.body()).get("balance").decimalValue())
-                .isEqualByComparingTo(balance);
+        assertThat(objectMapper.readTree(response.body()).get("amount").decimalValue())
+                .isEqualByComparingTo(amount);
+        assertThat(objectMapper.readTree(response.body()).get("type").asText()).isEqualTo(type.name());
+        assertThat(objectMapper.readTree(response.body()).get("status").asText()).isEqualTo("SUCCESS");
     }
 
     @InjectMocks
@@ -211,7 +213,7 @@ class WalletServiceTest {
 
         IdempotencyResponse result = walletService.deposit(1L, new BigDecimal("100.00"), key);
 
-        assertResponseBalance(result, "100.00");
+        assertResponseTransaction(result, TransactionType.DEPOSIT, "100.00");
         assertThat(wallet.getBalance())
                 .isEqualByComparingTo(new BigDecimal("100.00"));
 
@@ -289,7 +291,7 @@ class WalletServiceTest {
 
         IdempotencyResponse result = walletService.withdraw(1L, new BigDecimal("100.00"), key);
 
-        assertResponseBalance(result, "100.00");
+        assertResponseTransaction(result, TransactionType.WITHDRAWAL, "100.00");
         assertThat(wallet.getBalance())
                 .isEqualByComparingTo(new BigDecimal("100.00"));
 
@@ -386,7 +388,7 @@ class WalletServiceTest {
 
         IdempotencyResponse result = walletService.withdraw(1L, new BigDecimal("100.00"), key);
 
-        assertResponseBalance(result, "0.00");
+        assertResponseTransaction(result, TransactionType.WITHDRAWAL, "100.00");
         verify(walletRepository).save(wallet);
         assertThat(wallet.getBalance()).isEqualByComparingTo("0.00");
         verify(transactionRepository).save(any(Transaction.class));
@@ -413,7 +415,7 @@ class WalletServiceTest {
 
         IdempotencyResponse result = walletService.transfer(fromWalletId, toWalletId, new BigDecimal("100.00"), key);
 
-        assertResponseBalance(result, "200.00");
+        assertResponseTransaction(result, TransactionType.TRANSFER, "100.00");
         assertThat(fromWallet.getBalance())
                 .isEqualByComparingTo(new BigDecimal("200.00"));
         assertThat(toWallet.getBalance())
@@ -580,7 +582,7 @@ class WalletServiceTest {
 
         assertThat(wallet.getBalance()).isEqualByComparingTo("0.00");
         assertThat(wallet2.getBalance()).isEqualByComparingTo("100.00");
-        assertResponseBalance(result, "0.00");
+        assertResponseTransaction(result, TransactionType.TRANSFER, "100.00");
         verify(walletRepository).save(wallet);
         verify(walletRepository).save(wallet2);
         verify(transactionRepository).save(any(Transaction.class));

@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.math.BigDecimal;
+import org.springframework.data.domain.Pageable;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
@@ -120,7 +121,7 @@ class WalletConcurrencyIntegrationTest {
             Long walletId = testWallet.getId();
             Long userId = testWallet.getUser().getId();
             List<Transaction> transactions = transactionRepository
-                    .findAllByFromWalletIdOrToWalletIdOrderByCreatedAtDesc(walletId, walletId);
+                    .findHistory(walletId, null, null, Pageable.unpaged(), null, null).getContent();
 
             transactionRepository.deleteAll(transactions);
             transactionRepository.flush();
@@ -146,7 +147,7 @@ class WalletConcurrencyIntegrationTest {
                 .isEqualByComparingTo(new BigDecimal("120.00"));
 
         List<Transaction> transactions = transactionRepository
-                .findAllByFromWalletIdOrToWalletIdOrderByCreatedAtDesc(walletId, walletId);
+                .findHistory(walletId, null, null, Pageable.unpaged(), null, null).getContent();
 
         assertThat(transactions).hasSize(1);
         Transaction transaction = transactions.get(0);
@@ -183,8 +184,7 @@ class WalletConcurrencyIntegrationTest {
         assertThat(persistedWallet.getBalance())
                 .isEqualByComparingTo(new BigDecimal("150.00"));
         List<Transaction> transactions = transactionRepository
-                .findAllByFromWalletIdOrToWalletIdOrderByCreatedAtDesc(
-                        walletId, walletId);
+                .findHistory(walletId, null, null, Pageable.unpaged(), null, null).getContent();
 
         assertThat(transactions)
                 .hasSize(2)
@@ -235,8 +235,7 @@ class WalletConcurrencyIntegrationTest {
             assertThat(persistedWallet.getBalance())
                     .isEqualByComparingTo(new BigDecimal("20.00"));
             List<Transaction> transactions = transactionRepository
-                    .findAllByFromWalletIdOrToWalletIdOrderByCreatedAtDesc(
-                            walletId, walletId);
+                    .findHistory(walletId, null, null, Pageable.unpaged(), null, null).getContent();
 
             assertThat(transactions).hasSize(1);
 
@@ -284,7 +283,7 @@ class WalletConcurrencyIntegrationTest {
                 .isEqualByComparingTo(new BigDecimal("110.00"));
 
         List<Transaction> transactions = transactionRepository
-                .findAllByFromWalletIdOrToWalletIdOrderByCreatedAtDesc(walletId, walletId);
+                .findHistory(walletId, null, null, Pageable.unpaged(), null, null).getContent();
 
         assertThat(transactions)
                 .hasSize(2)
@@ -388,10 +387,10 @@ class WalletConcurrencyIntegrationTest {
                 .isEqualByComparingTo(new BigDecimal("100.00"));
 
         assertThat(transactionRepository
-                .findAllByFromWalletIdOrToWalletIdOrderByCreatedAtDesc(firstId, firstId))
+                .findHistory(firstId, null, null, Pageable.unpaged(), null, null).getContent())
                 .isEmpty();
         assertThat(transactionRepository
-                .findAllByFromWalletIdOrToWalletIdOrderByCreatedAtDesc(secondId, secondId))
+                .findHistory(secondId, null, null, Pageable.unpaged(), null, null).getContent())
                 .isEmpty();
 
         // executeWithoutResult has returned: the transaction holding the lock is finished.
@@ -501,8 +500,8 @@ class WalletConcurrencyIntegrationTest {
 
         assertThat(repeatedResponse).isEqualTo(firstResponse);
         assertThat(repeatedResponse.status()).isEqualTo(200);
-        assertThat(objectMapper.readTree(repeatedResponse.body()).get("balance").decimalValue())
-                .isEqualByComparingTo("120.00");
+        assertThat(objectMapper.readTree(repeatedResponse.body()).get("amount").decimalValue())
+                .isEqualByComparingTo("20.00");
         assertBalance(wallet, "170.00");
         assertBalance(secondWallet, "100.00");
         assertThat(history(wallet)).hasSize(2)
@@ -534,8 +533,8 @@ class WalletConcurrencyIntegrationTest {
             IdempotencyResponse repeatedResponse = secondTask.get(10, TimeUnit.SECONDS);
             assertThat(repeatedResponse).isEqualTo(firstResponse);
             assertThat(firstResponse.status()).isEqualTo(200);
-            assertThat(objectMapper.readTree(firstResponse.body()).get("balance").decimalValue())
-                    .isEqualByComparingTo("120.00");
+            assertThat(objectMapper.readTree(firstResponse.body()).get("amount").decimalValue())
+                    .isEqualByComparingTo("20.00");
         }
 
         assertBalance(wallet, "120.00");
@@ -611,7 +610,7 @@ class WalletConcurrencyIntegrationTest {
 
     private List<Transaction> history(Wallet testWallet) {
         Long walletId = testWallet.getId();
-        return transactionRepository.findAllByFromWalletIdOrToWalletIdOrderByCreatedAtDesc(walletId, walletId);
+        return transactionRepository.findHistory(walletId, null, null, Pageable.unpaged(), null, null).getContent();
     }
 
     private void assertBalance(Wallet testWallet, String expectedBalance) {

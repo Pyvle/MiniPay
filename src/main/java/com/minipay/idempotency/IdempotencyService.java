@@ -11,7 +11,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.minipay.common.exception.IdempotencyConflictException;
 import com.minipay.transaction.TransactionType;
-import com.minipay.wallet.dto.WalletResponse;
+import com.minipay.transaction.dto.TransactionResponse;
 
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.annotation.Propagation;
@@ -36,7 +36,7 @@ public class IdempotencyService {
             Long walletId,
             Long toWalletId,
             BigDecimal amount,
-            Supplier<WalletResponse> operation) {
+            Supplier<TransactionResponse> operation) {
         int insertedRows = recordRepository.tryReserve(key,
                 operationType.name(),
                 walletId,
@@ -47,13 +47,13 @@ public class IdempotencyService {
                 .orElseThrow(() -> new IllegalStateException("Key not found"));
 
         if(insertedRows == 1) {
-            WalletResponse walletResponse = operation.get();
+            TransactionResponse transactionResponse = operation.get();
 
             String json;
             try {
-                json = objectMapper.writeValueAsString(walletResponse);
+                json = objectMapper.writeValueAsString(transactionResponse);
             } catch (JsonProcessingException e) {
-                throw new IllegalStateException("Failed to serialize wallet response", e);
+                throw new IllegalStateException("Failed to serialize transaction response", e);
             }
 
             idempotencyRecord.complete(200, json);
