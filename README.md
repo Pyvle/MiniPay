@@ -1,299 +1,119 @@
 # MiniPay
 
-MiniPay is a payment system simulator.
-
-## Goal
-
-The goal of this project is to build a clear and practical payment flow with users, wallets, transactions, roles, database relations, REST API, and a simple UI.
-
-## Tech Stack
-
-Backend:
-- Java 21
-- Spring Boot
-- Spring Web
-- Spring Data JPA
-- PostgreSQL
-- Bean Validation
-
-Frontend:
-- React later, or simple server-rendered pages first
-
-Tools:
-- Gradle
-- Postman
-- Swagger / OpenAPI later
-- Docker later
-
-## Initial Scope
-
-The first version focuses on the core payment flow:
-
-- users
-- wallets
-- deposits
-- transfers
-- transaction history
-
-## Later Scope
-
-- roles and permissions
-- authentication
-- admin panel
-- merchant accounts
-- invoices
-- refunds
-- audit logs
-- UI
-
-## Wallet request idempotency
-
-Deposit, withdrawal, and transfer endpoints require an `Idempotency-Key` header
-containing a UUID. Use a new key for each new intended operation.
-
-- Repeating a successful request with the same key and parameters returns its
-  original HTTP status and JSON body without moving money again. The response
-  describes the original transaction, even if later operations changed the wallet.
-- New successful operations return HTTP `200` and a `TransactionResponse` with
-  `id`, `fromWalletId`, `toWalletId`, `amount`, `type`, `status`, and `createdAt`.
-  Deposits have no sender; withdrawals have no recipient. Balances are obtained
-  through the wallet endpoint. The transaction can be read at `GET /api/transactions/{id}`.
-- Keys saved before this response format changed replay their original stored
-  JSON (including the old wallet format) and status unchanged. They are not
-  deleted, converted, or executed again.
-- Reusing a stored key with a different operation type, wallet, recipient, or
-  amount returns `409 Conflict`. Numerically equal amounts such as `20.0` and
-  `20.00` are treated as equal. Keys are shared across the three operation types.
-- Reserving the key, updating balances, recording the financial operation, and
-  saving the response happen in one database transaction.
-- Failed attempts (including insufficient funds, balance limits, and lock
-  timeouts) roll back all those changes. No new key or financial operation is
-  retained. After resolving the cause, the same request can be retried with the
-  same key. A conflicting retry does not remove the original successful record.
-
-### Status meanings
-
-- `IdempotencyStatus.PROCESSING`: an intermediate state inside the uncommitted
-  transaction, not a separately committed background job.
-- `IdempotencyStatus.COMPLETED`: the successful operation and its response have
-  been saved together.
-- `TransactionStatus.SUCCESS`: the status of a persisted financial operation.
-- `TransactionStatus.CREATED` and `FAILED` remain in the enum but are not used by
-  the current synchronous flow. Failed attempts are not recorded in a separate
-  transaction; durable failure auditing is outside the current scope.
+Учебный симулятор платёжной системы: пользователи, кошельки, пополнение, снятие, переводы и история операций с фильтрами и пагинацией. Реализованы защита от повторных запросов, Swagger/OpenAPI и запуск через Docker Compose.
 
-## Transaction history API
+Стек: Java 21, Spring Boot, Spring Data JPA, PostgreSQL 16, Flyway, Gradle и Testcontainers.
 
-`GET /api/wallets/{id}/transactions` returns a public page object with exactly
-`content`, `page`, `size`, `totalElements`, and `totalPages`. `content` contains
-transaction responses; totals count only records matching all supplied filters.
+## Требования
 
-- Defaults: `page=0`, `size=20`. Pages are zero-based; `page >= 0` and
-  `1 <= size <= 100` are required. Invalid parameters return `400` in `ErrorResponse`
-  format; excessive sizes are rejected rather than silently reduced.
-- Ordering is fixed: `createdAt DESC`, then `id DESC`.
-- Optional `type` and `status` use the enum names, such as `TRANSFER` and `SUCCESS`.
-  Unknown values return `400`. Missing or empty filters (for example `?type=`)
-  apply no restriction. This also applies to empty `from` and `to`.
-- Optional `from` and `to` accept ISO local date-times, for example
-  `2026-09-28T12:00:00`, in the same local time convention as stored `createdAt`.
-  No time-zone conversion is performed. The interval is `[from, to)`:
-  `from` is inclusive, `to` exclusive. Equal bounds return an empty page;
-  `from > to` and malformed dates return `400`.
-- An existing wallet with no matches, or a page beyond the result, returns `200`
-  with empty `content`. A missing wallet returns `404` for valid parameters.
-  Page bounds are validated before wallet lookup.
+Для контейнерного запуска нужен работающий Docker с Compose (например, Docker Desktop в режиме Linux-контейнеров). Java, Gradle и PostgreSQL на компьютере устанавливать не нужно. Для первой сборки необходим интернет; порты `8080` и `5433` должны быть свободны.
 
-## Development Plan
+Команды ниже выполняются из корня проекта. Примеры локальных команд приведены для PowerShell.
 
-### MVP
+## Настройки
 
-The MVP focuses on the core payment flow: users, wallets, deposits, transfers, and transaction history.
+После скачивания проекта создай `.env` из шаблона, если этого файла ещё нет:
 
-#### 1. Project Setup
+```powershell
+Copy-Item .env.example .env
+```
 
-- Create a Spring Boot project
-- Configure Java 21
-- Configure Gradle
-- Connect PostgreSQL
-- Add basic application configuration
+Заполни настройки в `.env`:
 
-#### 2. Core Domain
+| Переменная | Назначение |
+| --- | --- |
+| `DB_USERNAME` | Пользователь PostgreSQL; Compose передаёт его БД и приложению |
+| `DB_PASSWORD` | Пароль этого пользователя; замени заглушку своим локальным паролем |
+| `DB_URL` | JDBC-адрес для запуска приложения вне Docker |
 
-Create the main domain entities:
+База в Compose называется `minipay`. Контейнер MiniPay получает адрес `jdbc:postgresql://postgres:5432/minipay` из `compose.yaml`, независимо от `DB_URL` в `.env`.
 
-- User
-- Wallet
-- Transaction
+Настройки из `.env.example` используют `localhost:5432` для отдельно установленной БД. Для подключения локально запущенного приложения к БД из Compose замени порт на `5433`.
 
-Add basic enums:
+Не коммить `.env` и не записывай настоящий пароль в README или `.env.example`. Изменение пользователя или пароля в `.env` не меняет учётные данные уже созданной БД в сохранённом volume.
 
-- TransactionType
-- TransactionStatus
+## Запуск через Docker
 
-Initial transaction types:
+```powershell
+docker compose up --build -d
+```
 
-- DEPOSIT
-- TRANSFER
-- WITHDRAWAL
+Docker собирает JAR и образ MiniPay, запускает PostgreSQL и ждёт успешной проверки готовности БД перед запуском приложения. Flyway автоматически создаёт схему, Hibernate проверяет её через `validate`. Создавать таблицы вручную не нужно.
 
-Initial transaction statuses:
+| Что открыть | Адрес |
+| --- | --- |
+| MiniPay — базовый адрес API | http://localhost:8080/api |
+| Swagger UI — просмотр и вызов API | http://localhost:8080/swagger-ui.html |
+| OpenAPI — описание API в JSON | http://localhost:8080/v3/api-docs |
+| PostgreSQL из DBeaver/pgAdmin на компьютере | `localhost:5433`, база `minipay`, учётные данные из `.env` |
 
-- CREATED
-- SUCCESS
-- FAILED
+Отдельной главной страницы пока нет; для работы с API используй Swagger. Внутри Compose приложение обращается к БД по `postgres:5432`; с компьютера клиент подключается по `localhost:5433`.
 
-#### 3. Wallet Logic
+## Управление и данные
 
-Implement basic wallet operations:
+| Действие | Команда |
+| --- | --- |
+| Состояние сервисов | `docker compose ps` |
+| Логи всех сервисов в реальном времени | `docker compose logs -f` |
+| Логи приложения | `docker compose logs -f minipay` |
+| Остановка с сохранением контейнеров и данных | `docker compose stop` |
+| Запуск остановленных контейнеров | `docker compose start` |
+| Остановка и удаление контейнеров с сохранением данных | `docker compose down` |
+| Повторное создание и запуск | `docker compose up -d` |
+| Пересборка после изменения кода | `docker compose up --build -d` |
 
-- create a wallet for a user
-- get wallet balance
-- deposit money into a wallet
-- transfer money between wallets
-- reject transfers when the sender has insufficient balance
+Данные PostgreSQL хранятся в именованном volume `postgres_data` (Docker обычно добавляет к имени префикс проекта), подключённом к `/var/lib/postgresql/data`. Они сохраняются после обычной остановки и пересоздания контейнеров.
 
-#### 4. REST API
+**Полный сброс учебных данных:** команда ниже удаляет контейнеры и volume с БД. Все сохранённые пользователи, кошельки и операции будут потеряны.
 
-Create the first REST endpoints:
+```powershell
+docker compose down -v
+```
 
-- create user
-- get user by id
-- create wallet
-- get wallet by id
-- deposit money
-- transfer money
-- get transaction history for a wallet
+При следующем `docker compose up -d` будет создана пустая БД, а Flyway заново применит миграции.
 
-#### 5. Database
+Проверенное в учебном сценарии поведение: при временной недоступности БД запрос, требующий обращения к ней, возвращает `500`. После запуска БД приложение восстанавливает соединение без собственного перезапуска.
 
-Store all core data in PostgreSQL:
+## Локальный запуск и тесты
 
-- users
-- wallets
-- transactions
+Для запуска вне контейнера нужны JDK 21 и доступная PostgreSQL. Укажи её адрес и учётные данные в `.env`. Можно использовать только БД из Compose: запусти `docker compose up -d postgres` и задай `DB_URL=jdbc:postgresql://localhost:5433/minipay`. Контейнер MiniPay при этом должен быть остановлен, чтобы освободить `8080`.
 
-Use JPA relationships:
+```powershell
+.\gradlew.bat bootRun
+```
 
-- User to Wallet
-- Wallet to Transaction
+Для полного запуска тестов нужны JDK 21 и работающий Docker: Testcontainers создаёт отдельную PostgreSQL для интеграционных проверок. Предварительно запускать сервисы Compose не требуется.
 
-#### 6. Basic Validation
+```powershell
+.\gradlew.bat test
+```
 
-Add validation for important rules:
+На Linux/macOS используй `./gradlew` вместо `.\gradlew.bat`. Сборка Docker-образа выполняет `bootJar` и не заменяет запуск тестов.
 
-- amount must be positive
-- wallet must exist
-- sender and receiver must be different
-- balance cannot become negative
+## Основные правила API
 
-#### 7. Basic UI
+### Денежные операции
 
-Create a simple UI for the main flow:
+Пополнение, снятие и перевод требуют заголовок `Idempotency-Key` с UUID. Для каждой новой операции используй новый ключ.
 
-- user list
-- wallet balance
-- deposit form
-- transfer form
-- transaction history
+- Успешный ответ: `200` и транзакция с полями `id`, `fromWalletId`, `toWalletId`, `amount`, `type`, `status`, `createdAt`. У пополнения нет отправителя, у снятия — получателя; баланс читается отдельно через API кошелька.
+- Повтор с тем же ключом и параметрами возвращает первоначальные статус и JSON без повторного движения денег. Ранее сохранённые ответы старого формата также возвращаются без преобразования.
+- Тот же ключ с другими параметрами даёт `409`. Ключи общие для всех трёх видов операций; суммы `20.0` и `20.00` равнозначны.
+- Балансы, транзакция и результат запроса сохраняются атомарно. Ошибка откатывает изменения и не сохраняет новый ключ: после устранения причины запрос можно повторить. Конфликт не удаляет результат ранее успешного запроса.
+- В текущем потоке сохраняются только операции со статусом `SUCCESS`; `CREATED` и `FAILED` пока не используются. У записи идемпотентности `PROCESSING` — промежуточное состояние внутри транзакции, `COMPLETED` — сохранённый успешный результат.
 
-### After MVP
+Получение отдельной операции: `GET /api/transactions/{id}`.
 
-After the MVP is complete, the project can be expanded with authentication, roles, merchant flows, admin tools, and more realistic payment behavior.
+### История кошелька
 
-#### 1. Authentication and Roles
+`GET /api/wallets/{id}/transactions` возвращает `content`, `page`, `size`, `totalElements`, `totalPages`. Счётчики учитывают все заданные фильтры.
 
-Add authentication and role-based access.
+- По умолчанию `page=0`, `size=20`; допустимы `page >= 0` и `1 <= size <= 100`. Нарушения дают `400` в формате `ErrorResponse`; размер не обрезается автоматически.
+- Порядок: `createdAt DESC`, затем `id DESC`.
+- Фильтры: `type`, `status`, `from`, `to`. Отсутствующие и пустые значения не ограничивают выборку; неизвестные enum и неверные даты дают `400`.
+- Время: ISO local date-time, например `2026-09-28T12:00:00`, в той же системе времени, что `createdAt`, без преобразования часовых поясов. Период `[from, to)`: начало включено, конец исключён. Равные границы дают пустую страницу, `from > to` — `400`.
+- Нет совпадений или страница за концом истории — `200` с пустым `content`. Нет кошелька — `404` при корректных параметрах; границы страницы проверяются до поиска кошелька.
 
-Planned roles:
+## Дальнейшее развитие
 
-- USER
-- ADMIN
-- MERCHANT
-- SUPPORT
-
-Features:
-
-- registration
-- login
-- password hashing
-- JWT authentication
-- role-based API access
-
-#### 2. Admin Panel
-
-Add admin features:
-
-- view all users
-- block and unblock users
-- view all wallets
-- view all transactions
-- filter transactions by status, type, and date
-
-#### 3. Merchant Flow
-
-Add merchant-related features:
-
-- merchant accounts
-- invoice creation
-- invoice payment
-- merchant transaction history
-- payment status tracking
-
-#### 4. Refunds
-
-Add refund logic:
-
-- create refund request
-- approve or reject refund
-- update original transaction status
-- store refund transaction
-
-#### 5. Audit Logs
-
-Store important system events:
-
-- user registration
-- wallet creation
-- deposits
-- transfers
-- failed payments
-- admin actions
-
-#### 6. Better UI
-
-Improve the frontend:
-
-- authentication screens
-- dashboard
-- wallet page
-- transaction filters
-- admin panel
-- merchant panel
-
-#### 7. API Documentation
-
-Add API documentation:
-
-- Swagger / OpenAPI
-- endpoint descriptions
-- request and response examples
-
-#### 8. Docker
-
-Add Docker support:
-
-- Dockerfile for backend
-- Docker Compose for backend and PostgreSQL
-- environment variables for configuration
-
-#### 9. Testing
-
-Add tests for important logic:
-
-- wallet creation
-- deposit
-- transfer
-- insufficient balance
-- transaction history
-- role-based access later
+Аутентификация и доступ только к своим кошелькам, роли, администрирование и пользовательский интерфейс. Дополнительно — merchant-сценарии, счета, возвраты и аудит.
