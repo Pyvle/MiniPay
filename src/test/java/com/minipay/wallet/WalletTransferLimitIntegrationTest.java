@@ -1,5 +1,7 @@
 package com.minipay.wallet;
 
+import com.minipay.support.TestUsers;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import java.math.BigDecimal;
@@ -39,9 +41,9 @@ class WalletTransferLimitIntegrationTest {
     void transferShouldRollbackWhenRecipientBalanceLimitIsExceeded() {
         UUID key = UUID.randomUUID();
         User savedFromUser = userRepository.saveAndFlush(
-                new User("Ivan", "ivan@example.com"));
+                TestUsers.create("Ivan", "ivan@example.com"));
         User savedToUser = userRepository.saveAndFlush(
-                new User("Obama", "obama@example.com"));
+                TestUsers.create("Obama", "obama@example.com"));
         Wallet fromWallet = new Wallet(savedFromUser);
         Wallet toWallet = new Wallet(savedToUser);
 

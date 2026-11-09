@@ -13,14 +13,18 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 import org.springframework.dao.PessimisticLockingFailureException;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.hibernate.exception.ConstraintViolationException;
 
 import com.minipay.common.exception.BalanceLimitExceededException;
 import com.minipay.common.exception.EmailAlreadyExistsException;
+import com.minipay.common.exception.InvalidCredentialsException;
 import com.minipay.common.exception.IdempotencyConflictException;
 import com.minipay.common.exception.InsufficientBalanceException;
 import com.minipay.common.exception.InvalidAmountException;
 import com.minipay.common.exception.InvalidDateRangeException;
 import com.minipay.common.exception.InvalidPageRequestException;
+import com.minipay.common.exception.InvalidRefreshTokenException;
 import com.minipay.common.exception.SelfTransferException;
 import com.minipay.common.exception.TransactionNotFoundException;
 import com.minipay.common.exception.UserNotFoundException;
@@ -31,6 +35,15 @@ import jakarta.servlet.http.HttpServletRequest;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    @ExceptionHandler(InvalidCredentialsException.class)
+    @ResponseStatus(HttpStatus.UNAUTHORIZED)
+    public ErrorResponse handleInvalidCredentials(
+            InvalidCredentialsException exception, HttpServletRequest request) {
+        return new ErrorResponse(HttpStatus.UNAUTHORIZED.value(),
+                HttpStatus.UNAUTHORIZED.getReasonPhrase(),
+                exception.getMessage(), request.getRequestURI());
+    }
 
     @ExceptionHandler(InvalidPageRequestException.class)
     @ResponseStatus(HttpStatus.BAD_REQUEST)
@@ -65,6 +78,29 @@ public class GlobalExceptionHandler {
                 HttpStatus.CONFLICT.getReasonPhrase(),
                 exception.getMessage(),
                 request.getRequestURI());
+    }
+
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<ErrorResponse> handleDataIntegrityViolation(
+            DataIntegrityViolationException exception,
+            HttpServletRequest request) {
+        Throwable cause = exception;
+        while (cause != null) {
+            if (cause instanceof ConstraintViolationException violation
+                    && "23505".equals(violation.getSQLState())
+                    && "users_email_key".equals(violation.getConstraintName())) {
+                ErrorResponse body = new ErrorResponse(
+                        HttpStatus.CONFLICT.value(),
+                        HttpStatus.CONFLICT.getReasonPhrase(),
+                        "Email already registered",
+                        request.getRequestURI());
+                return ResponseEntity.status(HttpStatus.CONFLICT).body(body);
+            }
+            cause = cause.getCause();
+        }
+
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(handleUnexpectedException(exception, request));
     }
 
     // Wallet not found
@@ -303,5 +339,17 @@ public class GlobalExceptionHandler {
                 HttpStatus.BAD_REQUEST.getReasonPhrase(),
                 exception.getMessage(),
                 request.getRequestURI());
+    }
+
+    @ExceptionHandler(InvalidRefreshTokenException.class)
+    @ResponseStatus(HttpStatus.UNAUTHORIZED)
+    public ErrorResponse handleInvalidRefreshToken(
+        InvalidRefreshTokenException exception,
+        HttpServletRequest request
+    ) {
+        return new ErrorResponse(HttpStatus.UNAUTHORIZED.value(), 
+        HttpStatus.UNAUTHORIZED.getReasonPhrase(), 
+        exception.getMessage(), 
+        request.getRequestURI());
     }
 }

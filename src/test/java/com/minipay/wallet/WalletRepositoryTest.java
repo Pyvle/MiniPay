@@ -1,5 +1,7 @@
 package com.minipay.wallet;
 
+import com.minipay.support.TestUsers;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -36,7 +38,7 @@ class WalletRepositoryTest {
 
     @BeforeEach
     void setUp() {
-        User user = new User("Ivan", "ivan@example.com");
+        User user = TestUsers.create("Ivan", "ivan@example.com");
         savedUser = userRepository.saveAndFlush(user);
     }
 

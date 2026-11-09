@@ -5,11 +5,8 @@ import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 
-import jakarta.validation.Valid;
-
 import java.util.List;
 
-import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 
 import io.swagger.v3.oas.annotations.Operation;
@@ -24,18 +21,6 @@ public class UserController {
 
     public UserController(UserService userService) {
         this.userService = userService;
-    }
-
-    @Operation(summary = "Создать нового пользователя", description = "Возвращает информацию о созданном пользователе")
-    @ApiResponse(responseCode = "400", description = "Некорректный JSON, имя или email",
-            content = @Content(mediaType = "application/json", schema = @Schema(implementation = ErrorResponse.class)))
-    @ApiResponse(responseCode = "409", description = "Email уже зарегистрирован",
-            content = @Content(mediaType = "application/json", schema = @Schema(implementation = ErrorResponse.class)))
-    @PostMapping
-    @ResponseStatus(HttpStatus.CREATED)
-    public UserResponse creatUser(@Valid @RequestBody CreateUserRequest request) {
-        User user = userService.createUser(request.getName(), request.getEmail());
-        return new UserResponse(user);
     }
 
     @Operation(summary = "Получить пользователя по ID", description = "Возвращает информацию о полученном пользователе")

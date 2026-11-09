@@ -45,7 +45,7 @@ import com.minipay.transaction.dto.TransactionResponse;
 import com.minipay.user.User;
 
 @WebMvcTest(WalletController.class)
-class WalletControllerTest {
+class WalletControllerTest extends com.minipay.support.MvcSecurityTestSupport {
 
     @Test
     void historyShouldTreatEmptyFiltersAsAbsentAndExposeOnlyPublicPageFields() throws Exception {

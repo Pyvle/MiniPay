@@ -1,5 +1,7 @@
 package com.minipay.wallet;
 
+import com.minipay.support.TestUsers;
+
 import java.math.BigDecimal;
 import org.springframework.data.domain.Pageable;
 import java.util.List;
@@ -33,6 +35,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 @org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc
 @Transactional
 @Import(PostgresTestConfiguration.class)
+@org.springframework.security.test.context.support.WithMockUser(username = "1")
 class WalletServiceIntegrationTest {
 
     @org.junit.jupiter.params.ParameterizedTest
@@ -60,7 +63,7 @@ class WalletServiceIntegrationTest {
             String endpoint, TransactionType type) throws Exception {
         wallet.deposit(new BigDecimal("100.00"));
         walletRepository.saveAndFlush(wallet);
-        User recipient = userRepository.saveAndFlush(new User("Recipient", "recipient@example.com"));
+        User recipient = userRepository.saveAndFlush(TestUsers.create("Recipient", "recipient@example.com"));
         Wallet recipientWallet = walletRepository.saveAndFlush(new Wallet(recipient));
         UUID key = UUID.randomUUID();
         String requestBody = type == TransactionType.TRANSFER
@@ -138,7 +141,7 @@ class WalletServiceIntegrationTest {
     @BeforeEach
     void setUp() {
         User user = userRepository.saveAndFlush(
-                new User("Ivan", "ivan@example.com"));
+                TestUsers.create("Ivan", "ivan@example.com"));
 
         wallet = walletRepository.saveAndFlush(new Wallet(user));
     }
@@ -177,7 +180,7 @@ class WalletServiceIntegrationTest {
         walletRepository.saveAndFlush(wallet);
 
         User savedToUser = userRepository.saveAndFlush(
-                new User("Obama", "obama@example.com"));
+                TestUsers.create("Obama", "obama@example.com"));
         Wallet toWallet = walletRepository.saveAndFlush(
                 new Wallet(savedToUser));
 

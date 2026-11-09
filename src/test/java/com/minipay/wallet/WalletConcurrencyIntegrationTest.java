@@ -1,5 +1,7 @@
 package com.minipay.wallet;
 
+import com.minipay.support.TestUsers;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -83,14 +85,14 @@ class WalletConcurrencyIntegrationTest {
     void setUp() {
         transactionTemplate = new TransactionTemplate(transactionManager);
         User user = userRepository.saveAndFlush(
-                new User("Ivan", "ivan-" + UUID.randomUUID() + "@example.com"));
+                TestUsers.create("Ivan", "ivan-" + UUID.randomUUID() + "@example.com"));
 
         wallet = new Wallet(user);
         wallet.deposit(new BigDecimal("100.00"));
         walletRepository.saveAndFlush(wallet);
 
         User secondUser = userRepository.saveAndFlush(
-                new User("Anna", "anna-" + UUID.randomUUID() + "@example.com"));
+                TestUsers.create("Anna", "anna-" + UUID.randomUUID() + "@example.com"));
 
         secondWallet = new Wallet(secondUser);
         secondWallet.deposit(new BigDecimal("100.00"));
@@ -460,7 +462,7 @@ class WalletConcurrencyIntegrationTest {
     @Test
     void sameKeyWithDifferentRecipientShouldConflictWithoutChangingState() {
         User thirdUser = userRepository.saveAndFlush(
-                new User("Petr", "petr-" + UUID.randomUUID() + "@example.com"));
+                TestUsers.create("Petr", "petr-" + UUID.randomUUID() + "@example.com"));
         thirdWallet = new Wallet(thirdUser);
         thirdWallet.deposit(new BigDecimal("100.00"));
         walletRepository.saveAndFlush(thirdWallet);

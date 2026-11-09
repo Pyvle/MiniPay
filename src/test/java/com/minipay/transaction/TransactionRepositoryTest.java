@@ -1,5 +1,7 @@
 package com.minipay.transaction;
 
+import com.minipay.support.TestUsers;
+
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -148,9 +150,9 @@ class TransactionRepositoryTest {
 
     @BeforeEach
     void setUp() {
-        User user1 = new User("Ivan", "ivan@example.com");
-        User user2 = new User("Anna", "anna@example.com");
-        User user3 = new User("Sam", "sam@example.com");
+        User user1 = TestUsers.create("Ivan", "ivan@example.com");
+        User user2 = TestUsers.create("Anna", "anna@example.com");
+        User user3 = TestUsers.create("Sam", "sam@example.com");
 
         userRepository.saveAndFlush(user1);
         userRepository.saveAndFlush(user2);

@@ -1,5 +1,7 @@
 package com.minipay.wallet;
 
+import com.minipay.support.TestUsers;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -44,11 +46,11 @@ class WalletServiceRollbackIntegrationTest {
     void transferShouldRollbackWhenTransactionSaveFails() {
         UUID key = UUID.randomUUID();
         User savedToUser = userRepository.saveAndFlush(
-                new User("Obama", "obama@example.com"));
+                TestUsers.create("Obama", "obama@example.com"));
         Wallet toWallet = walletRepository.saveAndFlush(
                 new Wallet(savedToUser));
         User savedFromUser = userRepository.saveAndFlush(
-                new User("Ivan", "ivan@example.com"));
+                TestUsers.create("Ivan", "ivan@example.com"));
         Wallet fromWallet = new Wallet(savedFromUser);
         fromWallet.deposit(new BigDecimal("300.00"));
         fromWallet = walletRepository.saveAndFlush(fromWallet);

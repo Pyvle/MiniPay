@@ -18,7 +18,7 @@ import com.minipay.common.exception.TransactionNotFoundException;
 import com.minipay.wallet.Wallet;
 
 @WebMvcTest(TransactionController.class)
-class TransactionControllerTest {
+class TransactionControllerTest extends com.minipay.support.MvcSecurityTestSupport {
 
     @Test
     void getTransactionShouldRejectNonNumericId() throws Exception {

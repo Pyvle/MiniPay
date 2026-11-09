@@ -1,5 +1,7 @@
 package com.minipay.wallet;
 
+import com.minipay.support.TestUsers;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -89,7 +91,7 @@ class WalletServiceTest {
     void createWalletForUserShouldCreateWallet() {
 
         Long userId = 1L;
-        User user = new User("Ivan", "Ivan@email.com");
+        User user = TestUsers.create("Ivan", "Ivan@email.com");
 
         when(userRepository.findById(userId))
                 .thenReturn(Optional.of(user));
@@ -138,7 +140,7 @@ class WalletServiceTest {
     @Test
     void createWalletForUserShouldThrowWhenWalletAlreadyExists() {
         when(userRepository.findById(999L))
-                .thenReturn(Optional.of(new User()));
+                .thenReturn(Optional.of(TestUsers.create("Test", "test@example.com")));
 
         when(walletRepository.existsByUserId(999L))
                 .thenReturn(true);
@@ -204,7 +206,7 @@ class WalletServiceTest {
     @Test
     void depositShouldIncreaseBalanceAndSaveTransaction() throws Exception {
         UUID key = UUID.randomUUID();
-        Wallet wallet = new Wallet(new User("Ivan", "ivan@example.com"));
+        Wallet wallet = new Wallet(TestUsers.create("Ivan", "ivan@example.com"));
 
         executeOperation(key, TransactionType.DEPOSIT, 1L, null, new BigDecimal("100.00"));
 
@@ -281,7 +283,7 @@ class WalletServiceTest {
     @Test
     void withdrawShouldDecreaseBalanceAndSaveTransaction() throws Exception {
         UUID key = UUID.randomUUID();
-        Wallet wallet = new Wallet(new User("Ivan", "ivan@example.com"));
+        Wallet wallet = new Wallet(TestUsers.create("Ivan", "ivan@example.com"));
         wallet.deposit(new BigDecimal("200.00"));
 
         executeOperation(key, TransactionType.WITHDRAWAL, 1L, null, new BigDecimal("100.00"));
@@ -378,7 +380,7 @@ class WalletServiceTest {
     @Test
     void withdrawShouldAllowWithdrawingEntireBalance() throws Exception {
         UUID key = UUID.randomUUID();
-        Wallet wallet = new Wallet(new User("Ivan", "ivan@example.com"));
+        Wallet wallet = new Wallet(TestUsers.create("Ivan", "ivan@example.com"));
         wallet.deposit(new BigDecimal("100.00"));
 
         executeOperation(key, TransactionType.WITHDRAWAL, 1L, null, new BigDecimal("100.00"));
@@ -400,8 +402,8 @@ class WalletServiceTest {
         UUID key = UUID.randomUUID();
         Long fromWalletId = 1L;
         Long toWalletId = 2L;
-        Wallet fromWallet = new Wallet(new User("Ivan", "ivan@example.com"));
-        Wallet toWallet = new Wallet(new User("Ivan", "ivan@example.com"));
+        Wallet fromWallet = new Wallet(TestUsers.create("Ivan", "ivan@example.com"));
+        Wallet toWallet = new Wallet(TestUsers.create("Ivan", "ivan@example.com"));
 
         fromWallet.deposit(new BigDecimal("300.00"));
 
@@ -567,9 +569,9 @@ class WalletServiceTest {
     @Test
     void transferShouldAllowTransferringEntireBalance() throws Exception {
         UUID key = UUID.randomUUID();
-        Wallet wallet = new Wallet(new User("Ivan", "ivan@example.com"));
+        Wallet wallet = new Wallet(TestUsers.create("Ivan", "ivan@example.com"));
         wallet.deposit(new BigDecimal("100.00"));
-        Wallet wallet2 = new Wallet(new User("Ivan", "ivan@example.com"));
+        Wallet wallet2 = new Wallet(TestUsers.create("Ivan", "ivan@example.com"));
 
         executeOperation(key, TransactionType.TRANSFER, 1L, 2L, new BigDecimal("100.00"));
 

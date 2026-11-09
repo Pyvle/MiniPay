@@ -1,5 +1,7 @@
 package com.minipay.user;
 
+import com.minipay.support.TestUsers;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -80,7 +82,7 @@ class UserServiceTest {
 
     @Test
     void getUserByIdShouldReturnUser() {
-        User user = new User(name, email);
+        User user = TestUsers.create(name, email);
 
         when(userRepository.findById(1L))
                 .thenReturn(Optional.of(user));
@@ -106,8 +108,8 @@ class UserServiceTest {
 
     @Test
     void getAllUsersShouldReturnAllUsers() {
-        User ivan = new User("Ivan", "ivan@email.com");
-        User anna = new User("Anna", "anna@email.com");
+        User ivan = TestUsers.create("Ivan", "ivan@email.com");
+        User anna = TestUsers.create("Anna", "anna@email.com");
 
         List<User> users = List.of(ivan, anna);
 
