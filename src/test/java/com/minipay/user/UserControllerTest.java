@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.security.access.AccessDeniedException;
 
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -39,7 +40,7 @@ class UserControllerTest extends com.minipay.support.MvcSecurityTestSupport {
     void getUserByIdShouldReturnUser() throws Exception {
         User user = TestUsers.create("John Doe", "john.doe@example.com");
 
-        when(userService.getUserById(1L))
+        when(userService.getProfileForViewer(1L, 1L))
                 .thenReturn(user);
 
         mockMvc.perform(get("/api/users/{id}", 1L))
@@ -47,13 +48,13 @@ class UserControllerTest extends com.minipay.support.MvcSecurityTestSupport {
                 .andExpect(jsonPath("$.name").value("John Doe"))
                 .andExpect(jsonPath("$.email").value("john.doe@example.com"));
 
-        verify(userService).getUserById(1L);
+        verify(userService).getProfileForViewer(1L, 1L);
     }
 
     @Test
     void getUserByIdShouldReturnNotFoundWhenUserNotFound() throws Exception {
 
-        when(userService.getUserById(999L))
+        when(userService.getProfileForViewer(1L, 999L))
                 .thenThrow(new UserNotFoundException(999L));
 
         mockMvc.perform(get("/api/users/{id}", 999L))
@@ -65,7 +66,7 @@ class UserControllerTest extends com.minipay.support.MvcSecurityTestSupport {
                 .andExpect(jsonPath("$.timestamp").isString())
                 .andExpect(jsonPath("$.message").value("User not found: 999"));
 
-        verify(userService).getUserById(999L);
+        verify(userService).getProfileForViewer(1L, 999L);
     }
 
     @Test
@@ -79,7 +80,7 @@ class UserControllerTest extends com.minipay.support.MvcSecurityTestSupport {
 
     @Test
     void getUserByIdShouldReturnInternalServerErrorWhenUnexpectedErrorOccurs() throws Exception {
-        when(userService.getUserById(1L))
+        when(userService.getProfileForViewer(1L, 1L))
                 .thenThrow(new RuntimeException("Internal diagnostic detail"));
 
         mockMvc.perform(get("/api/users/{id}", 1L))
@@ -90,7 +91,7 @@ class UserControllerTest extends com.minipay.support.MvcSecurityTestSupport {
                 .andExpect(jsonPath("$.path").value("/api/users/1"))
                 .andExpect(jsonPath("$.timestamp").exists());
 
-        verify(userService).getUserById(1L);
+        verify(userService).getProfileForViewer(1L, 1L);
     }
 
     @Test
@@ -100,7 +101,7 @@ class UserControllerTest extends com.minipay.support.MvcSecurityTestSupport {
 
         List<User> users = List.of(user, user2);
 
-        when(userService.getAllUsers())
+        when(userService.getAllUsers(1L))
                 .thenReturn(users);
 
         mockMvc.perform(get("/api/users"))
@@ -111,7 +112,7 @@ class UserControllerTest extends com.minipay.support.MvcSecurityTestSupport {
                 .andExpect(jsonPath("$[1].name").value("Dama"))
                 .andExpect(jsonPath("$[1].email").value("dama@example.com"));
 
-        verify(userService).getAllUsers();
+        verify(userService).getAllUsers(1L);
     }
 
     @Test
@@ -129,14 +130,27 @@ class UserControllerTest extends com.minipay.support.MvcSecurityTestSupport {
     @Test
     void getAllUsersShouldReturnEmptyList() throws Exception {
 
-        when(userService.getAllUsers())
+        when(userService.getAllUsers(1L))
                 .thenReturn(List.of());
 
         mockMvc.perform(get("/api/users"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(0));
 
-        verify(userService).getAllUsers();
+        verify(userService).getAllUsers(1L);
+    }
+
+    @Test
+    void getAllUsersShouldReturnForbiddenWhenAccessIsDenied() throws Exception {
+        when(userService.getAllUsers(1L)).thenThrow(new AccessDeniedException("Internal detail"));
+
+        mockMvc.perform(get("/api/users"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.status").value(403))
+                .andExpect(jsonPath("$.error").value("Forbidden"))
+                .andExpect(jsonPath("$.message").value("Access denied"))
+                .andExpect(jsonPath("$.path").value("/api/users"))
+                .andExpect(jsonPath("$.timestamp").exists());
     }
 
     @Test

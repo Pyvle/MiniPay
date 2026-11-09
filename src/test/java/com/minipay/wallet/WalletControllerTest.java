@@ -156,13 +156,7 @@ class WalletControllerTest extends com.minipay.support.MvcSecurityTestSupport {
         when(walletService.createWalletForUser(1L))
                 .thenReturn(wallet);
 
-        mockMvc.perform(post("/api/wallets")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("""
-                        {
-                            "userId": 1
-                        }
-                        """))
+        mockMvc.perform(post("/api/wallets/me"))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.id").value(10))
                 .andExpect(jsonPath("$.userId").value(1))
@@ -174,31 +168,21 @@ class WalletControllerTest extends com.minipay.support.MvcSecurityTestSupport {
     }
 
     @Test
-    void createWalletShouldReturnBadRequestWhenUserIdIsMissing() throws Exception {
-        mockMvc.perform(post("/api/wallets")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("""
-                        {}
-                        """))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.message").value(
-                        containsString("userId:")));
+    @org.springframework.security.test.context.support.WithAnonymousUser
+    void createWalletShouldReturnUnauthorizedWithoutAuthentication() throws Exception {
+        mockMvc.perform(post("/api/wallets/me"))
+                .andExpect(status().isUnauthorized());
 
         verifyNoInteractions(walletService);
     }
 
     @Test
+    @org.springframework.security.test.context.support.WithMockUser(username = "999")
     void createWalletShouldReturnNotFoundWhenUserNotFound() throws Exception {
         when(walletService.createWalletForUser(999L))
                 .thenThrow(new UserNotFoundException(999L));
 
-        mockMvc.perform(post("/api/wallets")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("""
-                        {
-                          "userId": 999
-                        }
-                        """))
+        mockMvc.perform(post("/api/wallets/me"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.message").value("User not found: 999"));
 
@@ -206,17 +190,12 @@ class WalletControllerTest extends com.minipay.support.MvcSecurityTestSupport {
     }
 
     @Test
+    @org.springframework.security.test.context.support.WithMockUser(username = "999")
     void createWalletShouldReturnConflictWhenWalletAlreadyExists() throws Exception {
         when(walletService.createWalletForUser(999L))
                 .thenThrow(new WalletAlreadyExistsException(999L));
 
-        mockMvc.perform(post("/api/wallets")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("""
-                        {
-                          "userId": 999
-                        }
-                        """))
+        mockMvc.perform(post("/api/wallets/me"))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.message").value("Wallet already exists for user: 999"));
 
@@ -236,7 +215,7 @@ class WalletControllerTest extends com.minipay.support.MvcSecurityTestSupport {
         when(wallet.getUser()).thenReturn(user);
         when(wallet.getBalance()).thenReturn(new BigDecimal("100.00"));
 
-        when(walletService.getWalletById(10L))
+        when(walletService.getWalletById(1L, 10L))
                 .thenReturn(wallet);
 
         mockMvc.perform(get("/api/wallets/{id}", 10L))
@@ -247,19 +226,19 @@ class WalletControllerTest extends com.minipay.support.MvcSecurityTestSupport {
                 .andExpect(jsonPath("$.userEmail").value("john@example.com"))
                 .andExpect(jsonPath("$.balance").value(100.00));
 
-        verify(walletService).getWalletById(10L);
+        verify(walletService).getWalletById(1L, 10L);
     }
 
     @Test
     void getWalletByIdShouldReturnNotFoundWhenWalletNotFound() throws Exception {
-        when(walletService.getWalletById(999L))
+        when(walletService.getWalletById(1L, 999L))
                 .thenThrow(new WalletNotFoundException(999L));
 
         mockMvc.perform(get("/api/wallets/{id}", 999L))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.message").value("Wallet not found: 999"));
 
-        verify(walletService).getWalletById(999L);
+        verify(walletService).getWalletById(1L, 999L);
     }
 
     @Test
@@ -275,7 +254,7 @@ class WalletControllerTest extends com.minipay.support.MvcSecurityTestSupport {
         when(wallet.getUser()).thenReturn(user);
         when(wallet.getBalance()).thenReturn(new BigDecimal("100.00"));
 
-        when(walletService.getWalletByUserId(1L))
+        when(walletService.getWalletByUserId(1L, 1L))
                 .thenReturn(wallet);
 
         mockMvc.perform(get("/api/wallets/by-user/{userId}", 1L))
@@ -286,21 +265,21 @@ class WalletControllerTest extends com.minipay.support.MvcSecurityTestSupport {
                 .andExpect(jsonPath("$.userEmail").value("john@example.com"))
                 .andExpect(jsonPath("$.balance").value(100.00));
 
-        verify(walletService).getWalletByUserId(1L);
+        verify(walletService).getWalletByUserId(1L, 1L);
     }
 
     @Test
     void getWalletByUserIdShouldReturnNotFoundWhenWalletNotFound()
             throws Exception {
 
-        when(walletService.getWalletByUserId(999L))
+        when(walletService.getWalletByUserId(1L, 999L))
                 .thenThrow(WalletNotFoundException.forUserId(999L));
 
         mockMvc.perform(get("/api/wallets/by-user/{userId}", 999L))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.message").value("Wallet not found for user: 999"));
 
-        verify(walletService).getWalletByUserId(999L);
+        verify(walletService).getWalletByUserId(1L, 999L);
     }
 
     @Test
@@ -311,10 +290,10 @@ class WalletControllerTest extends com.minipay.support.MvcSecurityTestSupport {
                 {"id":101,"fromWalletId":null,"toWalletId":10,"amount":100.00,"type":"DEPOSIT","status":"SUCCESS","createdAt":"2026-09-28T12:00:00"}
                 """;
 
-        when(walletService.deposit(10L, new BigDecimal("100.00"), key))
+        when(walletService.depositForUser(1L, new BigDecimal("100.00"), key))
                 .thenReturn(new IdempotencyResponse(200, json));
 
-        mockMvc.perform(post("/api/wallets/{id}/deposit", 10L)
+        mockMvc.perform(post("/api/wallets/me/deposit")
                 .header("Idempotency-Key", key.toString())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
@@ -329,14 +308,14 @@ class WalletControllerTest extends com.minipay.support.MvcSecurityTestSupport {
                 .andExpect(jsonPath("$.amount").value(100.00));
 
         verify(walletService)
-                .deposit(10L, new BigDecimal("100.00"), key);
+                .depositForUser(1L, new BigDecimal("100.00"), key);
     }
 
     @Test
     void depositShouldReturnBadRequestWhenAmountIsInvalid() throws Exception {
         UUID key = UUID.randomUUID();
 
-        mockMvc.perform(post("/api/wallets/{id}/deposit", 10L)
+        mockMvc.perform(post("/api/wallets/me/deposit")
                 .header("Idempotency-Key", key.toString())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
@@ -354,10 +333,10 @@ class WalletControllerTest extends com.minipay.support.MvcSecurityTestSupport {
     @Test
     void depositShouldReturnNotFoundWhenServiceThrows() throws Exception {
         UUID key = UUID.randomUUID();
-        when(walletService.deposit(999L, new BigDecimal("100.00"), key))
+        when(walletService.depositForUser(1L, new BigDecimal("100.00"), key))
                 .thenThrow(new WalletNotFoundException(999L));
 
-        mockMvc.perform(post("/api/wallets/{id}/deposit", 999L)
+        mockMvc.perform(post("/api/wallets/me/deposit")
                 .header("Idempotency-Key", key.toString())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
@@ -369,14 +348,14 @@ class WalletControllerTest extends com.minipay.support.MvcSecurityTestSupport {
                 .andExpect(jsonPath("$.message").value("Wallet not found: 999"));
 
         verify(walletService)
-                .deposit(999L, new BigDecimal("100.00"), key);
+                .depositForUser(1L, new BigDecimal("100.00"), key);
     }
 
     @Test
     void depositShouldReturnBadRequestWhenAmountIsMissing() throws Exception {
         UUID key = UUID.randomUUID();
 
-        mockMvc.perform(post("/api/wallets/{id}/deposit", 10L)
+        mockMvc.perform(post("/api/wallets/me/deposit")
                 .header("Idempotency-Key", key.toString())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
@@ -391,7 +370,7 @@ class WalletControllerTest extends com.minipay.support.MvcSecurityTestSupport {
 
     @Test
     void depositShouldReturnBadRequestWhenIdempotencyKeyIsMissing() throws Exception {
-        mockMvc.perform(post("/api/wallets/{id}/deposit", 10L)
+        mockMvc.perform(post("/api/wallets/me/deposit")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
                         {
@@ -407,7 +386,7 @@ class WalletControllerTest extends com.minipay.support.MvcSecurityTestSupport {
 
     @Test
     void depositShouldReturnBadRequestWhenIdempotencyKeyIsInvalid() throws Exception {
-        mockMvc.perform(post("/api/wallets/{id}/deposit", 10L)
+        mockMvc.perform(post("/api/wallets/me/deposit")
                 .header("Idempotency-Key", "not-a-uuid")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
@@ -425,10 +404,10 @@ class WalletControllerTest extends com.minipay.support.MvcSecurityTestSupport {
     void depositShouldReturnBadRequestWhenServiceThrowsInvalidAmountException()
             throws Exception {
         UUID key = UUID.randomUUID();
-        when(walletService.deposit(10L, new BigDecimal("500.00"), key))
+        when(walletService.depositForUser(1L, new BigDecimal("500.00"), key))
                 .thenThrow(new InvalidAmountException());
 
-        mockMvc.perform(post("/api/wallets/{id}/deposit", 10L)
+        mockMvc.perform(post("/api/wallets/me/deposit")
                 .header("Idempotency-Key", key.toString())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
@@ -445,10 +424,10 @@ class WalletControllerTest extends com.minipay.support.MvcSecurityTestSupport {
     void depositShouldReturnConflictWhenServiceThrowsBalanceLimitExceededException()
             throws Exception {
         UUID key = UUID.randomUUID();
-        when(walletService.deposit(10L, new BigDecimal("0.01"), key))
+        when(walletService.depositForUser(1L, new BigDecimal("0.01"), key))
                 .thenThrow(new BalanceLimitExceededException());
 
-        mockMvc.perform(post("/api/wallets/{id}/deposit", 10L)
+        mockMvc.perform(post("/api/wallets/me/deposit")
                 .header("Idempotency-Key", key.toString())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
@@ -468,10 +447,10 @@ class WalletControllerTest extends com.minipay.support.MvcSecurityTestSupport {
                 {"id":101,"fromWalletId":10,"toWalletId":null,"amount":50.00,"type":"WITHDRAWAL","status":"SUCCESS","createdAt":"2026-09-28T12:00:00"}
                 """;
 
-        when(walletService.withdraw(10L, new BigDecimal("50.00"), key))
+        when(walletService.withdrawForUser(1L, new BigDecimal("50.00"), key))
                 .thenReturn(new IdempotencyResponse(200, json));
 
-        mockMvc.perform(post("/api/wallets/{id}/withdraw", 10L)
+        mockMvc.perform(post("/api/wallets/me/withdraw")
                 .header("Idempotency-Key", key.toString())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
@@ -486,13 +465,13 @@ class WalletControllerTest extends com.minipay.support.MvcSecurityTestSupport {
                 .andExpect(jsonPath("$.amount").value(50.00));
 
         verify(walletService)
-                .withdraw(10L, new BigDecimal("50.00"), key);
+                .withdrawForUser(1L, new BigDecimal("50.00"), key);
     }
 
     @Test
     void withdrawShouldReturnBadRequestWhenAmountIsInvalid() throws Exception {
         UUID key = UUID.randomUUID();
-        mockMvc.perform(post("/api/wallets/{id}/withdraw", 10L)
+        mockMvc.perform(post("/api/wallets/me/withdraw")
                 .header("Idempotency-Key", key.toString())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
@@ -512,10 +491,10 @@ class WalletControllerTest extends com.minipay.support.MvcSecurityTestSupport {
             throws Exception {
         UUID key = UUID.randomUUID();
 
-        when(walletService.withdraw(10L, new BigDecimal("500.00"), key))
+        when(walletService.withdrawForUser(1L, new BigDecimal("500.00"), key))
                 .thenThrow(new InsufficientBalanceException());
 
-        mockMvc.perform(post("/api/wallets/{id}/withdraw", 10L)
+        mockMvc.perform(post("/api/wallets/me/withdraw")
                 .header("Idempotency-Key", key.toString())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
@@ -528,12 +507,12 @@ class WalletControllerTest extends com.minipay.support.MvcSecurityTestSupport {
                         .value("Insufficient balance"));
 
         verify(walletService)
-                .withdraw(10L, new BigDecimal("500.00"), key);
+                .withdrawForUser(1L, new BigDecimal("500.00"), key);
     }
 
     @Test
     void withdrawShouldReturnBadRequestWhenIdempotencyKeyIsMissing() throws Exception {
-        mockMvc.perform(post("/api/wallets/{id}/withdraw", 10L)
+        mockMvc.perform(post("/api/wallets/me/withdraw")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
                         {
@@ -549,7 +528,7 @@ class WalletControllerTest extends com.minipay.support.MvcSecurityTestSupport {
 
     @Test
     void withdrawShouldReturnBadRequestWhenIdempotencyKeyIsInvalid() throws Exception {
-        mockMvc.perform(post("/api/wallets/{id}/withdraw", 10L)
+        mockMvc.perform(post("/api/wallets/me/withdraw")
                 .header("Idempotency-Key", "not-a-uuid")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
@@ -570,12 +549,12 @@ class WalletControllerTest extends com.minipay.support.MvcSecurityTestSupport {
                 {"id":101,"fromWalletId":10,"toWalletId":20,"amount":50.00,"type":"TRANSFER","status":"SUCCESS","createdAt":"2026-09-28T12:00:00"}
                 """;
 
-        when(walletService.transfer(
-                10L,
+        when(walletService.transferForUser(
+                1L,
                 20L,
                 new BigDecimal("50.00"), key)).thenReturn(new IdempotencyResponse(200, json));
 
-        mockMvc.perform(post("/api/wallets/{fromWalletId}/transfer", 10L)
+        mockMvc.perform(post("/api/wallets/me/transfer")
                 .header("Idempotency-Key", key.toString())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
@@ -590,8 +569,8 @@ class WalletControllerTest extends com.minipay.support.MvcSecurityTestSupport {
                 .andExpect(jsonPath("$.id").value(101))
                 .andExpect(jsonPath("$.amount").value(50.00));
 
-        verify(walletService).transfer(
-                10L,
+        verify(walletService).transferForUser(
+                1L,
                 20L,
                 new BigDecimal("50.00"), key);
     }
@@ -599,7 +578,7 @@ class WalletControllerTest extends com.minipay.support.MvcSecurityTestSupport {
     @Test
     void transferShouldReturnBadRequestWhenAmountIsInvalid() throws Exception {
         UUID key = UUID.randomUUID();
-        mockMvc.perform(post("/api/wallets/{fromWalletId}/transfer", 10L)
+        mockMvc.perform(post("/api/wallets/me/transfer")
                 .header("Idempotency-Key", key.toString())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
@@ -620,7 +599,7 @@ class WalletControllerTest extends com.minipay.support.MvcSecurityTestSupport {
             throws Exception {
         UUID key = UUID.randomUUID();
 
-        mockMvc.perform(post("/api/wallets/{fromWalletId}/transfer", 10L)
+        mockMvc.perform(post("/api/wallets/me/transfer")
                 .header("Idempotency-Key", key.toString())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
@@ -640,12 +619,12 @@ class WalletControllerTest extends com.minipay.support.MvcSecurityTestSupport {
             throws Exception {
         UUID key = UUID.randomUUID();
 
-        when(walletService.transfer(
-                10L,
+        when(walletService.transferForUser(
+                1L,
                 10L,
                 new BigDecimal("50.00"), key)).thenThrow(new SelfTransferException(10L));
 
-        mockMvc.perform(post("/api/wallets/{fromWalletId}/transfer", 10L)
+        mockMvc.perform(post("/api/wallets/me/transfer")
                 .header("Idempotency-Key", key.toString())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
@@ -658,8 +637,8 @@ class WalletControllerTest extends com.minipay.support.MvcSecurityTestSupport {
                 .andExpect(jsonPath("$.message").value(
                         "Cannot transfer to the same wallet: 10"));
 
-        verify(walletService).transfer(
-                10L,
+        verify(walletService).transferForUser(
+                1L,
                 10L,
                 new BigDecimal("50.00"), key);
     }
@@ -669,12 +648,12 @@ class WalletControllerTest extends com.minipay.support.MvcSecurityTestSupport {
             throws Exception {
         UUID key = UUID.randomUUID();
 
-        when(walletService.transfer(
-                10L,
+        when(walletService.transferForUser(
+                1L,
                 20L,
                 new BigDecimal("500.00"), key)).thenThrow(new InsufficientBalanceException());
 
-        mockMvc.perform(post("/api/wallets/{fromWalletId}/transfer", 10L)
+        mockMvc.perform(post("/api/wallets/me/transfer")
                 .header("Idempotency-Key", key.toString())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
@@ -687,8 +666,8 @@ class WalletControllerTest extends com.minipay.support.MvcSecurityTestSupport {
                 .andExpect(jsonPath("$.message").value(
                         "Insufficient balance"));
 
-        verify(walletService).transfer(
-                10L,
+        verify(walletService).transferForUser(
+                1L,
                 20L,
                 new BigDecimal("500.00"), key);
     }
@@ -698,7 +677,7 @@ class WalletControllerTest extends com.minipay.support.MvcSecurityTestSupport {
             throws Exception {
         UUID key = UUID.randomUUID();
 
-        mockMvc.perform(post("/api/wallets/{fromWalletId}/transfer", 10L)
+        mockMvc.perform(post("/api/wallets/me/transfer")
                 .header("Idempotency-Key", key.toString())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
@@ -715,7 +694,7 @@ class WalletControllerTest extends com.minipay.support.MvcSecurityTestSupport {
 
     @Test
     void transferShouldReturnBadRequestWhenIdempotencyKeyIsMissing() throws Exception {
-        mockMvc.perform(post("/api/wallets/{fromWalletId}/transfer", 10L)
+        mockMvc.perform(post("/api/wallets/me/transfer")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
                         {
@@ -732,7 +711,7 @@ class WalletControllerTest extends com.minipay.support.MvcSecurityTestSupport {
 
     @Test
     void transferShouldReturnBadRequestWhenIdempotencyKeyIsInvalid() throws Exception {
-        mockMvc.perform(post("/api/wallets/{fromWalletId}/transfer", 10L)
+        mockMvc.perform(post("/api/wallets/me/transfer")
                 .header("Idempotency-Key", "not-a-uuid")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
@@ -833,11 +812,11 @@ class WalletControllerTest extends com.minipay.support.MvcSecurityTestSupport {
     void depositShouldReturnConflictWhenWalletLockCannotBeAcquired()
             throws Exception {
                 UUID key = UUID.randomUUID();
-        when(walletService.deposit(10L, new BigDecimal("20.00"), key))
+        when(walletService.depositForUser(1L, new BigDecimal("20.00"), key))
                 .thenThrow(new CannotAcquireLockException(
                         "Technical database details"));
 
-        mockMvc.perform(post("/api/wallets/{id}/deposit", 10L)
+        mockMvc.perform(post("/api/wallets/me/deposit")
         .header("Idempotency-Key", key.toString())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
@@ -850,9 +829,9 @@ class WalletControllerTest extends com.minipay.support.MvcSecurityTestSupport {
                 .andExpect(jsonPath("$.error").value("Conflict"))
                 .andExpect(jsonPath("$.message").value(
                         "Operation conflicted with another request. Please try again."))
-                .andExpect(jsonPath("$.path").value("/api/wallets/10/deposit"));
+                .andExpect(jsonPath("$.path").value("/api/wallets/me/deposit"));
 
-        verify(walletService).deposit(10L, new BigDecimal("20.00"), key);
+        verify(walletService).depositForUser(1L, new BigDecimal("20.00"), key);
     }
 
     @Test
@@ -861,10 +840,10 @@ class WalletControllerTest extends com.minipay.support.MvcSecurityTestSupport {
         UUID key = UUID.randomUUID();
         String message = "Idempotency key has already been used with different request parameters";
 
-        when(walletService.deposit(10L, new BigDecimal("20.00"), key))
+        when(walletService.depositForUser(1L, new BigDecimal("20.00"), key))
                 .thenThrow(new IdempotencyConflictException(message));
 
-        mockMvc.perform(post("/api/wallets/{id}/deposit", 10L)
+        mockMvc.perform(post("/api/wallets/me/deposit")
                 .header("Idempotency-Key", key.toString())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
@@ -877,9 +856,9 @@ class WalletControllerTest extends com.minipay.support.MvcSecurityTestSupport {
                 .andExpect(jsonPath("$.status").value(409))
                 .andExpect(jsonPath("$.error").value("Conflict"))
                 .andExpect(jsonPath("$.message").value(message))
-                .andExpect(jsonPath("$.path").value("/api/wallets/10/deposit"));
+                .andExpect(jsonPath("$.path").value("/api/wallets/me/deposit"));
 
-        verify(walletService).deposit(10L, new BigDecimal("20.00"), key);
+        verify(walletService).depositForUser(1L, new BigDecimal("20.00"), key);
     }
 
 }

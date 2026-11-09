@@ -25,6 +25,9 @@ import org.springframework.data.domain.Sort;
 
 import com.minipay.common.exception.TransactionNotFoundException;
 import com.minipay.common.exception.WalletNotFoundException;
+import com.minipay.permission.PermissionCode;
+import com.minipay.permission.PermissionService;
+import com.minipay.support.TestUsers;
 import com.minipay.transaction.dto.TransactionResponse;
 import com.minipay.wallet.Wallet;
 import com.minipay.wallet.WalletRepository;
@@ -169,14 +172,12 @@ class TransactionServiceTest {
 
     @Test
     void getTransacrionByIdShouldReturnTransaction() {
-        Wallet wallet = new Wallet();
-
-        Transaction transaction = Transaction.deposit(wallet, new BigDecimal("300.00"));
+        Transaction transaction = Transaction.deposit(walletOwnedBy(1L), new BigDecimal("300.00"));
 
         when(transactionRepository.findById(1L))
             .thenReturn(Optional.of(transaction));
 
-        Transaction result = transactionService.getTransactionById(1L);
+        Transaction result = transactionService.getTransactionById(1L, 1L);
 
         assertSame(transaction, result);
 
@@ -214,9 +215,38 @@ class TransactionServiceTest {
             .thenReturn(Optional.empty());
 
         TransactionNotFoundException exception = assertThrows(TransactionNotFoundException.class,
-            () -> transactionService.getTransactionById(999L));
+            () -> transactionService.getTransactionById(1L, 999L));
 
             assertEquals("Transaction not found: 999", exception.getMessage());
             verify(transactionRepository).findById(999L);
+    }
+
+    @Mock
+    private PermissionService permissionService;
+
+    @Test
+    void transactionIsVisibleToBothParticipantsAndReadersWithPermissionOnly() {
+        Transaction transfer = Transaction.transfer(walletOwnedBy(1L), walletOwnedBy(2L), new BigDecimal("25.00"));
+        when(transactionRepository.findById(10L)).thenReturn(Optional.of(transfer));
+        when(permissionService.hasPermission(4L, PermissionCode.TRANSACTION_READ_ANY)).thenReturn(true);
+
+        assertSame(transfer, transactionService.getTransactionById(1L, 10L));
+        assertSame(transfer, transactionService.getTransactionById(2L, 10L));
+        assertSame(transfer, transactionService.getTransactionById(4L, 10L));
+        assertEquals("Transaction not found: 10", assertThrows(TransactionNotFoundException.class,
+                () -> transactionService.getTransactionById(3L, 10L)).getMessage());
+    }
+
+    @Test
+    void withdrawalIsVisibleToTheOwnerOfItsSourceWallet() {
+        Transaction withdrawal = Transaction.withdraw(walletOwnedBy(1L), new BigDecimal("25.00"));
+        when(transactionRepository.findById(10L)).thenReturn(Optional.of(withdrawal));
+        assertSame(withdrawal, transactionService.getTransactionById(1L, 10L));
+    }
+
+    private Wallet walletOwnedBy(long userId) {
+        var user = TestUsers.create("Owner", "owner@example.com");
+        org.springframework.test.util.ReflectionTestUtils.setField(user, "id", userId);
+        return new Wallet(user);
     }
 }

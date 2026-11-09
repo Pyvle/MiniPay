@@ -7,22 +7,29 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.minipay.common.exception.InvalidDateRangeException;
 import com.minipay.common.exception.InvalidPageRequestException;
 import com.minipay.common.exception.TransactionNotFoundException;
 import com.minipay.common.exception.WalletNotFoundException;
+import com.minipay.permission.PermissionCode;
+import com.minipay.permission.PermissionService;
 import com.minipay.transaction.dto.TransactionResponse;
+import com.minipay.wallet.Wallet;
 import com.minipay.wallet.WalletRepository;
 
 @Service
 public class TransactionService {
     private final WalletRepository walletRepository;
     private final TransactionRepository transactionRepository;
+    private final PermissionService permissionService;
 
-    public TransactionService(TransactionRepository transactionRepository, WalletRepository walletRepository) {
+    public TransactionService(TransactionRepository transactionRepository, WalletRepository walletRepository,
+            PermissionService permissionService) {
         this.transactionRepository = transactionRepository;
         this.walletRepository = walletRepository;
+        this.permissionService = permissionService;
     }
 
     public Page<TransactionResponse> getTransactionsByWalletId(Long walletId,
@@ -49,10 +56,20 @@ public class TransactionService {
         return transactions.map(TransactionResponse::new);
     }
 
-    public Transaction getTransactionById(Long id) {
-
-        return transactionRepository.findById(id)
+    @Transactional(readOnly = true)
+    public Transaction getTransactionById(Long actorId, Long id) {
+        Transaction transaction = transactionRepository.findById(id)
                 .orElseThrow(() -> new TransactionNotFoundException(id));
+        if (!ownsWallet(actorId, transaction.getFromWallet())
+                && !ownsWallet(actorId, transaction.getToWallet())
+                && !permissionService.hasPermission(actorId, PermissionCode.TRANSACTION_READ_ANY)) {
+            throw new TransactionNotFoundException(id);
+        }
+        return transaction;
+    }
+
+    private boolean ownsWallet(Long actorId, Wallet wallet) {
+        return wallet != null && actorId.equals(wallet.getUser().getId());
     }
 
 }

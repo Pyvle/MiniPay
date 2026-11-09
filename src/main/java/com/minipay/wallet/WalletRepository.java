@@ -14,6 +14,12 @@ public interface WalletRepository extends JpaRepository<Wallet, Long> {
 
     boolean existsByUserId(Long userId);
 
+    @Query("select w.id from Wallet w where w.user.id = :userId")
+    Optional<Long> findIdByUserId(@Param("userId") Long userId);
+
+    @Query("select w.user.state from Wallet w where w.id = :walletId")
+    Optional<com.minipay.user.UserState> findOwnerState(@Param("walletId") Long walletId);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select w from Wallet w where w.id = :id")
     Optional<Wallet> findByIdForUpdate(@Param("id") Long id);

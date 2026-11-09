@@ -17,19 +17,44 @@ import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.security.access.AccessDeniedException;
 
 import com.minipay.common.exception.EmailAlreadyExistsException;
 import com.minipay.common.exception.UserNotFoundException;
+import com.minipay.permission.Permission;
+import com.minipay.permission.PermissionCode;
+import com.minipay.permission.PermissionService;
+import com.minipay.role.Role;
 
 @ExtendWith(MockitoExtension.class)
 class UserServiceTest {
 
     @Mock
     private UserRepository userRepository;
+
+    @Mock
+    private PermissionService permissionService;
+
+    @Test
+    void foreignProfileShouldBeReturnedWithReadAnyPermission() {
+        User target = TestUsers.create("Target", "target@example.com");
+        when(permissionService.hasPermission(1L, PermissionCode.PROFILE_READ_ANY)).thenReturn(true);
+        when(userRepository.findById(2L)).thenReturn(Optional.of(target));
+
+        assertSame(target, userService.getProfileForViewer(1L, 2L));
+    }
+
+    @Test
+    void foreignProfileShouldNotBeLookedUpWithoutReadAnyPermission() {
+        assertThrows(UserNotFoundException.class, () -> userService.getProfileForViewer(1L, 2L));
+        verify(userRepository, never()).findById(2L);
+    }
 
     @InjectMocks
     private UserService userService;
@@ -108,6 +133,7 @@ class UserServiceTest {
 
     @Test
     void getAllUsersShouldReturnAllUsers() {
+        when(permissionService.hasPermission(1L, PermissionCode.USER_LIST)).thenReturn(true);
         User ivan = TestUsers.create("Ivan", "ivan@email.com");
         User anna = TestUsers.create("Anna", "anna@email.com");
 
@@ -116,7 +142,7 @@ class UserServiceTest {
         when(userRepository.findAll())
                 .thenReturn(users);
 
-        List<User> result = userService.getAllUsers();
+        List<User> result = userService.getAllUsers(1L);
 
         assertEquals(users, result);
         verify(userRepository).findAll();
@@ -124,12 +150,67 @@ class UserServiceTest {
 
     @Test
     void getAllUsersShouldReturnEmptyListWhenUsersDoNotExist() {
+        when(permissionService.hasPermission(1L, PermissionCode.USER_LIST)).thenReturn(true);
         when(userRepository.findAll())
                 .thenReturn(List.of());
 
-        List<User> result = userService.getAllUsers();
+        List<User> result = userService.getAllUsers(1L);
 
         assertTrue(result.isEmpty());
         verify(userRepository).findAll();
+    }
+
+    @Test
+    void getAllUsersShouldRejectWithoutPermissionBeforeReadingUsers() {
+        assertThrows(AccessDeniedException.class, () -> userService.getAllUsers(1L));
+        verify(userRepository, never()).findAll();
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "NONE, false, false",
+            "PROFILE_READ_ANY, true, false",
+            "USER_LIST, false, true",
+            "SUPER_ADMIN, true, true"
+    })
+    void profileAndListShouldRequireIndependentPermissions(
+            String assignment, boolean canReadProfile, boolean canList) {
+        long actorId = 1L;
+        long targetId = 2L;
+        User actor = TestUsers.create("Actor", "actor@example.com");
+        User target = TestUsers.create("Target", "target@example.com");
+        switch (assignment) {
+            case "PROFILE_READ_ANY" -> {
+                Role role = new Role("Support", 1);
+                role.getPermissions().add(new Permission(PermissionCode.PROFILE_READ_ANY.name()));
+                actor.setMainRole(role);
+            }
+            case "USER_LIST" -> {
+                actor.setMainRole(new Role("Support", 1));
+                actor.getExtraPermissions().add(new Permission(PermissionCode.USER_LIST.name()));
+            }
+            case "SUPER_ADMIN" -> actor.setSystemRole(SystemRole.SUPER_ADMIN);
+            case "NONE" -> { }
+            default -> throw new IllegalArgumentException(assignment);
+        }
+
+        when(userRepository.findById(actorId)).thenReturn(Optional.of(actor));
+        UserService service = new UserService(userRepository, new PermissionService(userRepository));
+
+        if (canReadProfile) {
+            when(userRepository.findById(targetId)).thenReturn(Optional.of(target));
+            assertSame(target, service.getProfileForViewer(actorId, targetId));
+        } else {
+            assertThrows(UserNotFoundException.class, () -> service.getProfileForViewer(actorId, targetId));
+            verify(userRepository, never()).findById(targetId);
+        }
+
+        if (canList) {
+            when(userRepository.findAll()).thenReturn(List.of(actor, target));
+            assertEquals(List.of(actor, target), service.getAllUsers(actorId));
+        } else {
+            assertThrows(AccessDeniedException.class, () -> service.getAllUsers(actorId));
+            verify(userRepository, never()).findAll();
+        }
     }
 }

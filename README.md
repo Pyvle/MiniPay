@@ -94,6 +94,8 @@ docker compose down -v
 
 ### Денежные операции
 
+Кошелёк создаётся запросом `POST /api/wallets/me` без тела. `GET /api/wallets/me` возвращает кошелёк вошедшего пользователя. Для пополнения, снятия и перевода используются `POST /api/wallets/me/deposit`, `POST /api/wallets/me/withdraw` и `POST /api/wallets/me/transfer`. Кошелёк, с которого выполняется операция, определяется по токену; для перевода в теле передаётся только ID кошелька получателя и сумма.
+
 Пополнение, снятие и перевод требуют заголовок `Idempotency-Key` с UUID. Для каждой новой операции используй новый ключ.
 
 - Успешный ответ: `200` и транзакция с полями `id`, `fromWalletId`, `toWalletId`, `amount`, `type`, `status`, `createdAt`. У пополнения нет отправителя, у снятия — получателя; баланс читается отдельно через API кошелька.
@@ -106,7 +108,7 @@ docker compose down -v
 
 ### История кошелька
 
-`GET /api/wallets/{id}/transactions` возвращает `content`, `page`, `size`, `totalElements`, `totalPages`. Счётчики учитывают все заданные фильтры.
+`GET /api/wallets/me/transactions` возвращает историю своего кошелька. `GET /api/wallets/{id}/transactions` доступен владельцу или пользователю с правом `HISTORY_READ_ANY`. Ответ содержит `content`, `page`, `size`, `totalElements`, `totalPages`. Счётчики учитывают все заданные фильтры.
 
 - По умолчанию `page=0`, `size=20`; допустимы `page >= 0` и `1 <= size <= 100`. Нарушения дают `400` в формате `ErrorResponse`; размер не обрезается автоматически.
 - Порядок: `createdAt DESC`, затем `id DESC`.

@@ -44,7 +44,7 @@ class TransactionControllerTest extends com.minipay.support.MvcSecurityTestSuppo
                 wallet,
                 new BigDecimal("100.00"));
 
-        when(transactionService.getTransactionById(1L))
+        when(transactionService.getTransactionById(1L, 1L))
                 .thenReturn(transaction);
 
         mockMvc.perform(get("/api/transactions/{id}", 1L))
@@ -53,19 +53,19 @@ class TransactionControllerTest extends com.minipay.support.MvcSecurityTestSuppo
                 .andExpect(jsonPath("$.type").value("DEPOSIT"))
                 .andExpect(jsonPath("$.status").value("SUCCESS"));
 
-        verify(transactionService).getTransactionById(1L);
+        verify(transactionService).getTransactionById(1L, 1L);
     }
 
     @Test
     void getTransactionByIdShpuldReturnNotFoundWhenTransactionNotFound() throws Exception {
-        when(transactionService.getTransactionById(999L))
+        when(transactionService.getTransactionById(1L, 999L))
                 .thenThrow(new TransactionNotFoundException(999L));
 
         mockMvc.perform(get("/api/transactions/{id}", 999L))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.message").value("Transaction not found: 999"));
 
-        verify(transactionService).getTransactionById(999L);
+        verify(transactionService).getTransactionById(1L, 999L);
     }
 
 }

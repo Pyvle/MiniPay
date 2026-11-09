@@ -7,6 +7,7 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 
 import java.util.List;
 
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import io.swagger.v3.oas.annotations.Operation;
@@ -24,21 +25,23 @@ public class UserController {
     }
 
     @Operation(summary = "Получить пользователя по ID", description = "Возвращает информацию о полученном пользователе")
-    @ApiResponse(responseCode = "400", description = "Некорректный формат ID пользователя",
-            content = @Content(mediaType = "application/json", schema = @Schema(implementation = ErrorResponse.class)))
-    @ApiResponse(responseCode = "404", description = "Пользователь не найден",
-            content = @Content(mediaType = "application/json", schema = @Schema(implementation = ErrorResponse.class)))
+    @ApiResponse(responseCode = "400", description = "Некорректный формат ID пользователя", content = @Content(mediaType = "application/json", schema = @Schema(implementation = ErrorResponse.class)))
+    @ApiResponse(responseCode = "404", description = "Пользователь не найден", content = @Content(mediaType = "application/json", schema = @Schema(implementation = ErrorResponse.class)))
     @GetMapping("/{id}")
     public UserResponse getUserById(
-            @Parameter(description = "ID пользователя", example = "25") @PathVariable("id") Long id) {
-        User user = userService.getUserById(id);
+            @Parameter(description = "ID пользователя", example = "25") @PathVariable("id") Long id,
+            Authentication authentication) {
+
+        Long actorId = Long.valueOf(authentication.getName());
+        User user = userService.getProfileForViewer(actorId, id);
         return new UserResponse(user);
     }
 
     @Operation(summary = "Получить всех пользователей", description = "Возвращает информацию о всех пользователях")
     @GetMapping
-    public List<UserResponse> getAllUsers() {
-        return userService.getAllUsers()
+    public List<UserResponse> getAllUsers(Authentication authentication) {
+        Long actorId = Long.valueOf(authentication.getName());
+        return userService.getAllUsers(actorId)
                 .stream()
                 .map(UserResponse::new)
                 .toList();

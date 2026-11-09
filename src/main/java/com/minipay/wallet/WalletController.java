@@ -7,7 +7,6 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
-import com.minipay.wallet.dto.CreateWalletRequest;
 import com.minipay.wallet.dto.AmountRequest;
 import com.minipay.wallet.dto.TransferRequest;
 import com.minipay.wallet.dto.WalletResponse;
@@ -35,6 +34,7 @@ import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -53,84 +53,84 @@ public class WalletController {
         this.transactionService = transactionService;
     }
 
-    @Operation(summary = "Создать кошелек по ID пользователя", description = "Возвращает информацию о созданном кошельке")
-    @ApiResponse(responseCode = "400", description = "Некорректное тело запроса или отсутствует ID пользователя",
+    @Operation(summary = "Создать свой кошелёк", description = "Владелец определяется по access token")
+    @ApiResponse(responseCode = "401", description = "Требуется аутентификация",
             content = @Content(mediaType = "application/json", schema = @Schema(implementation = ErrorResponse.class)))
     @ApiResponse(responseCode = "404", description = "Пользователь не найден",
             content = @Content(mediaType = "application/json", schema = @Schema(implementation = ErrorResponse.class)))
     @ApiResponse(responseCode = "409", description = "У пользователя уже есть кошелёк",
             content = @Content(mediaType = "application/json", schema = @Schema(implementation = ErrorResponse.class)))
-    @PostMapping
+    @PostMapping("/me")
     @ResponseStatus(HttpStatus.CREATED)
-    public WalletResponse createWallet(@Valid @RequestBody CreateWalletRequest request) {
-        Wallet wallet = walletService.createWalletForUser(request.getUserId());
+    public WalletResponse createWallet(Authentication authentication) {
+        Wallet wallet = walletService.createWalletForUser(actorId(authentication));
         return new WalletResponse(wallet);
     }
 
-    @Operation(summary = "Пополнить кошелек по ID на указанную сумму", description = "Возвращает информацию о транзакции")
+    @Operation(summary = "Пополнить свой кошелёк", description = "Возвращает информацию о транзакции")
     @ApiResponse(responseCode = "400", description = "Некорректный ID, JSON, сумма; отсутствует или неверен UUID Idempotency-Key",
             content = @Content(mediaType = "application/json", schema = @Schema(implementation = ErrorResponse.class)))
     @ApiResponse(responseCode = "404", description = "Кошелёк не найден",
             content = @Content(mediaType = "application/json", schema = @Schema(implementation = ErrorResponse.class)))
     @ApiResponse(responseCode = "409", description = "Превышен лимит баланса, конфликт ключа или параллельных операций",
             content = @Content(mediaType = "application/json", schema = @Schema(implementation = ErrorResponse.class)))
-    @PostMapping("/{id}/deposit")
+    @PostMapping("/me/deposit")
     @ApiResponse(responseCode = "200", description = "Созданная транзакция. Повтор возвращает сохранённый ответ; старые ключи могут содержать прежний JSON кошелька.",
             content = @Content(mediaType = "application/json", schema = @Schema(implementation = TransactionResponse.class)))
     public ResponseEntity<String> deposit(
-            @Parameter(description = "ID кошелька", example = "25") @PathVariable("id") Long id,
+            Authentication authentication,
             @Valid @RequestBody AmountRequest request,
             @Parameter(description = "Обязательный UUID: новый ключ для новой операции. Повтор с теми же параметрами возвращает первоначальные статус и JSON без повторного движения денег; другие параметры с прежним ключом дают 409.", required = true, schema = @Schema(type = "string", format = "uuid"))
             @RequestHeader("Idempotency-Key") UUID idempotencyKey) {
 
-        IdempotencyResponse result = walletService.deposit(
-                id, request.getAmount(), idempotencyKey);
+        IdempotencyResponse result = walletService.depositForUser(
+                actorId(authentication), request.getAmount(), idempotencyKey);
 
         return ResponseEntity.status(result.status())
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(result.body());
     }
 
-    @Operation(summary = "Вывести с кошелька по ID указанную сумму", description = "Возвращает информацию о транзакции")
+    @Operation(summary = "Снять средства со своего кошелька", description = "Возвращает информацию о транзакции")
     @ApiResponse(responseCode = "400", description = "Некорректный ID, JSON, сумма; отсутствует или неверен UUID Idempotency-Key",
             content = @Content(mediaType = "application/json", schema = @Schema(implementation = ErrorResponse.class)))
     @ApiResponse(responseCode = "404", description = "Кошелёк не найден",
             content = @Content(mediaType = "application/json", schema = @Schema(implementation = ErrorResponse.class)))
     @ApiResponse(responseCode = "409", description = "Недостаточно средств, конфликт ключа или параллельных операций",
             content = @Content(mediaType = "application/json", schema = @Schema(implementation = ErrorResponse.class)))
-    @PostMapping("/{id}/withdraw")
+    @PostMapping("/me/withdraw")
     @ApiResponse(responseCode = "200", description = "Созданная транзакция. Повтор возвращает сохранённый ответ; старые ключи могут содержать прежний JSON кошелька.",
             content = @Content(mediaType = "application/json", schema = @Schema(implementation = TransactionResponse.class)))
     public ResponseEntity<String> withdraw(
-            @Parameter(description = "ID кошелька", example = "25") @PathVariable("id") Long id,
+            Authentication authentication,
             @Valid @RequestBody AmountRequest request,
             @Parameter(description = "Обязательный UUID: новый ключ для новой операции. Повтор с теми же параметрами возвращает первоначальные статус и JSON без повторного движения денег; другие параметры с прежним ключом дают 409.", required = true, schema = @Schema(type = "string", format = "uuid"))
             @RequestHeader("Idempotency-Key") UUID idempotencyKey) {
 
-        IdempotencyResponse result = walletService.withdraw(
-                id, request.getAmount(), idempotencyKey);
+        IdempotencyResponse result = walletService.withdrawForUser(
+                actorId(authentication), request.getAmount(), idempotencyKey);
         return ResponseEntity.status(result.status())
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(result.body());
     }
 
-    @Operation(summary = "Перевести с одного кошелька на другой по ID кошельков указанную сумму", description = "Возвращает информацию о транзакции")
+    @Operation(summary = "Перевести со своего кошелька на кошелёк получателя", description = "Возвращает информацию о транзакции")
     @ApiResponse(responseCode = "400", description = "Некорректный ID, JSON, сумма или UUID; отсутствует заголовок или получатель; перевод самому себе",
             content = @Content(mediaType = "application/json", schema = @Schema(implementation = ErrorResponse.class)))
     @ApiResponse(responseCode = "404", description = "Кошелёк отправителя или получателя не найден",
             content = @Content(mediaType = "application/json", schema = @Schema(implementation = ErrorResponse.class)))
     @ApiResponse(responseCode = "409", description = "Недостаточно средств, превышен лимит баланса получателя, конфликт ключа или параллельных операций",
             content = @Content(mediaType = "application/json", schema = @Schema(implementation = ErrorResponse.class)))
-    @PostMapping("/{fromWalletId}/transfer")
+    @PostMapping("/me/transfer")
     @ApiResponse(responseCode = "200", description = "Созданная транзакция. Повтор возвращает сохранённый ответ; старые ключи могут содержать прежний JSON кошелька.",
             content = @Content(mediaType = "application/json", schema = @Schema(implementation = TransactionResponse.class)))
     public ResponseEntity<String> transfer(
-            @Parameter(description = "ID кошелька с которого будет произведен перевод", example = "25") @PathVariable("fromWalletId") Long fromWalletId,
+            Authentication authentication,
             @Valid @RequestBody TransferRequest request,
             @Parameter(description = "Обязательный UUID: новый ключ для новой операции. Повтор с теми же параметрами возвращает первоначальные статус и JSON без повторного движения денег; другие параметры с прежним ключом дают 409.", required = true, schema = @Schema(type = "string", format = "uuid"))
             @RequestHeader("Idempotency-Key") UUID idempotencyKey) {
 
-        IdempotencyResponse result = walletService.transfer(fromWalletId,
+        IdempotencyResponse result = walletService.transferForUser(actorId(authentication),
                 request.getToWalletId(),
                 request.getAmount(),
                 idempotencyKey);
@@ -146,9 +146,16 @@ public class WalletController {
             content = @Content(mediaType = "application/json", schema = @Schema(implementation = ErrorResponse.class)))
     @GetMapping("/{id}")
     public WalletResponse getWalletById(
-            @Parameter(description = "ID кошелька", example = "25") @PathVariable("id") Long id) {
-        Wallet wallet = walletService.getWalletById(id);
+            @Parameter(description = "ID кошелька", example = "25") @PathVariable("id") Long id,
+            Authentication authentication) {
+        Wallet wallet = walletService.getWalletById(Long.valueOf(authentication.getName()), id);
         return new WalletResponse(wallet);
+    }
+
+    @GetMapping("/me")
+    public WalletResponse getOwnWallet(Authentication authentication) {
+        Long actorId = actorId(authentication);
+        return new WalletResponse(walletService.getWalletByUserId(actorId, actorId));
     }
 
     @Operation(summary = "Получить информацию о кошельке по ID пользователя", description = "Возвращает информацию о кошельке")
@@ -158,8 +165,9 @@ public class WalletController {
             content = @Content(mediaType = "application/json", schema = @Schema(implementation = ErrorResponse.class)))
     @GetMapping("/by-user/{userId}")
     public WalletResponse getWalletByUserId(
-            @Parameter(description = "ID пользователя", example = "25") @PathVariable("userId") Long userId) {
-        Wallet wallet = walletService.getWalletByUserId(userId);
+            @Parameter(description = "ID пользователя", example = "25") @PathVariable("userId") Long userId,
+            Authentication authentication) {
+        Wallet wallet = walletService.getWalletByUserId(Long.valueOf(authentication.getName()), userId);
         return new WalletResponse(wallet);
     }
 
@@ -168,9 +176,10 @@ public class WalletController {
             content = @Content(mediaType = "application/json", schema = @Schema(implementation = ErrorResponse.class)))
     @ApiResponse(responseCode = "404", description = "Кошелёк не найден",
             content = @Content(mediaType = "application/json", schema = @Schema(implementation = ErrorResponse.class)))
-    @GetMapping("/{id}/transactions")
+    @GetMapping({"/me/transactions", "/{id}/transactions"})
     public PageResponse<TransactionResponse> getTransactionByWalletId(
-            @Parameter(description = "ID кошелька", example = "25") @PathVariable("id") Long id,
+            @Parameter(description = "ID кошелька", example = "25") @PathVariable(name = "id", required = false) Long id,
+            Authentication authentication,
             @RequestParam(name = "type", required = false) TransactionType type,
             @RequestParam(name = "status", required = false) TransactionStatus status,
             @Parameter(description = "Номер страницы с нуля", schema = @Schema(minimum = "0", defaultValue = "0"))
@@ -181,7 +190,18 @@ public class WalletController {
             @RequestParam(name = "from", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime from,
             @Parameter(description = "Верхняя граница исключительно, без часового пояса", example = "2026-10-01T00:00:00")
             @RequestParam(name = "to", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime to) {
-        return PageResponse.from(transactionService.getTransactionsByWalletId(id, type, status, page, size, from, to));
+        Long actorId = actorId(authentication);
+        Long walletId = id;
+        if (walletId == null) {
+            walletId = walletService.getWalletByUserId(actorId, actorId).getId();
+        } else {
+            walletService.requireHistoryAccess(actorId, walletId);
+        }
+        return PageResponse.from(transactionService.getTransactionsByWalletId(walletId, type, status, page, size, from, to));
+    }
+
+    private static Long actorId(Authentication authentication) {
+        return Long.valueOf(authentication.getName());
     }
 
 }

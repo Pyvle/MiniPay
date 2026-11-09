@@ -1,6 +1,9 @@
 package com.minipay.wallet;
 
 import com.minipay.support.TestUsers;
+import com.minipay.permission.PermissionCode;
+import com.minipay.permission.PermissionService;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -60,6 +63,9 @@ class WalletServiceTest {
 
     @Mock
     private IdempotencyService idempotencyService;
+
+    @Mock
+    private PermissionService permissionService;
 
     private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
 
@@ -155,12 +161,14 @@ class WalletServiceTest {
     // getWalletById
     @Test
     void getWalletByIdShouldReturnWallet() {
-        Wallet wallet = new Wallet();
+        User owner = TestUsers.create("Owner", "owner@example.com");
+        ReflectionTestUtils.setField(owner, "id", 1L);
+        Wallet wallet = new Wallet(owner);
 
         when(walletRepository.findById(1L))
                 .thenReturn(Optional.of(wallet));
 
-        Wallet result = walletService.getWalletById(1L);
+        Wallet result = walletService.getWalletById(1L, 1L);
 
         assertSame(wallet, result);
         verify(walletRepository).findById(1L);
@@ -172,7 +180,7 @@ class WalletServiceTest {
                 .thenReturn(Optional.empty());
 
         WalletNotFoundException exception = assertThrows(WalletNotFoundException.class,
-                () -> walletService.getWalletById(999L));
+                () -> walletService.getWalletById(1L, 999L));
 
         assertEquals("Wallet not found: 999", exception.getMessage());
     }
@@ -185,7 +193,7 @@ class WalletServiceTest {
         when(walletRepository.findByUserId(1L))
                 .thenReturn(Optional.of(wallet));
 
-        Wallet result = walletService.getWalletByUserId(1L);
+        Wallet result = walletService.getWalletByUserId(1L, 1L);
 
         assertSame(wallet, result);
         verify(walletRepository).findByUserId(1L);
@@ -197,9 +205,29 @@ class WalletServiceTest {
                 .thenReturn(Optional.empty());
 
         WalletNotFoundException exception = assertThrows(WalletNotFoundException.class,
-                () -> walletService.getWalletByUserId(999L));
+                () -> walletService.getWalletByUserId(999L, 999L));
 
         assertEquals("Wallet not found for user: 999", exception.getMessage());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void foreignWalletRequiresReadAnyPermission(boolean allowed) {
+        User owner = TestUsers.create("Owner", "owner@example.com");
+        ReflectionTestUtils.setField(owner, "id", 2L);
+        Wallet wallet = new Wallet(owner);
+        when(walletRepository.findById(10L)).thenReturn(Optional.of(wallet));
+        when(permissionService.hasPermission(1L, PermissionCode.WALLET_READ_ANY)).thenReturn(allowed);
+
+        if (allowed) {
+            when(walletRepository.findByUserId(2L)).thenReturn(Optional.of(wallet));
+            assertSame(wallet, walletService.getWalletById(1L, 10L));
+            assertSame(wallet, walletService.getWalletByUserId(1L, 2L));
+        } else {
+            assertThrows(WalletNotFoundException.class, () -> walletService.getWalletById(1L, 10L));
+            assertThrows(WalletNotFoundException.class, () -> walletService.getWalletByUserId(1L, 2L));
+            verify(walletRepository, never()).findByUserId(2L);
+        }
     }
 
     // deposit

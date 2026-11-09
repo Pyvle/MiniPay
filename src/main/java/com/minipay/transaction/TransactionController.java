@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.security.core.Authentication;
 
 import com.minipay.transaction.dto.TransactionResponse;
 
@@ -34,8 +35,10 @@ public class TransactionController {
             content = @Content(mediaType = "application/json", schema = @Schema(implementation = ErrorResponse.class)))
     @GetMapping("{id}")
     public TransactionResponse getTransactionById(
-            @Parameter(description = "ID транзакции", example = "25") @PathVariable("id") Long id) {
-        Transaction transaction = transactionService.getTransactionById(id);
+            @Parameter(description = "ID транзакции", example = "25") @PathVariable("id") Long id,
+            Authentication authentication) {
+        Long actorId = Long.valueOf(authentication.getName());
+        Transaction transaction = transactionService.getTransactionById(actorId, id);
         return new TransactionResponse(transaction);
     }
 

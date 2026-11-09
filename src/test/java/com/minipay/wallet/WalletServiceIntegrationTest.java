@@ -29,6 +29,10 @@ import jakarta.persistence.PersistenceContext;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @ActiveProfiles("test")
 @SpringBootTest(properties = "spring.jpa.hibernate.ddl-auto=validate")
@@ -42,7 +46,8 @@ class WalletServiceIntegrationTest {
     @org.junit.jupiter.params.provider.CsvSource({"-1,20", "0,0", "0,-1", "0,101", "abc,20", "0,abc"})
     void historyShouldReturnBadRequestForInvalidPageParameters(String page, String size) throws Exception {
         mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get(
-                "/api/wallets/" + wallet.getId() + "/transactions").param("page", page).param("size", size))
+                "/api/wallets/" + wallet.getId() + "/transactions").with(user(wallet.getUser().getId().toString()))
+                .param("page", page).param("size", size))
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isBadRequest())
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.status").value(400))
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.error").value("Bad Request"))
@@ -69,8 +74,9 @@ class WalletServiceIntegrationTest {
         String requestBody = type == TransactionType.TRANSFER
                 ? "{\"amount\":20.00,\"toWalletId\":" + recipientWallet.getId() + "}"
                 : "{\"amount\":20.00}";
-        String url = "/api/wallets/" + wallet.getId() + "/" + endpoint;
+        String url = "/api/wallets/me/" + endpoint;
         var response = mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post(url)
+                .with(user(wallet.getUser().getId().toString()))
                 .header("Idempotency-Key", key.toString())
                 .contentType(org.springframework.http.MediaType.APPLICATION_JSON).content(requestBody))
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk())
@@ -96,7 +102,7 @@ class WalletServiceIntegrationTest {
         entityManager.flush();
         entityManager.clear();
         var fetched = mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get(
-                "/api/transactions/" + body.get("id").asLong()))
+                "/api/transactions/" + body.get("id").asLong()).with(user(wallet.getUser().getId().toString())))
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk())
                 .andReturn().getResponse();
         var fetchedBody = objectMapper.readTree(fetched.getContentAsString());
@@ -108,6 +114,7 @@ class WalletServiceIntegrationTest {
 
         walletService.deposit(wallet.getId(), new BigDecimal("5.00"), UUID.randomUUID());
         var repeated = mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post(url)
+                .with(user(wallet.getUser().getId().toString()))
                 .header("Idempotency-Key", key.toString())
                 .contentType(org.springframework.http.MediaType.APPLICATION_JSON).content(requestBody))
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk())
@@ -118,6 +125,62 @@ class WalletServiceIntegrationTest {
                 .isEqualByComparingTo(type == TransactionType.DEPOSIT ? "125.00" : "85.00");
         assertThat(walletRepository.findById(recipientWallet.getId()).orElseThrow().getBalance())
                 .isEqualByComparingTo(type == TransactionType.TRANSFER ? "20.00" : "0.00");
+    }
+
+    @Test
+    void anotherUserCannotReplayDepositWithSameKeyAndAmount() throws Exception {
+        User other = userRepository.saveAndFlush(TestUsers.create("Other", "other@example.com"));
+        Wallet otherWallet = walletRepository.saveAndFlush(new Wallet(other));
+        String key = UUID.randomUUID().toString();
+        String request = "{\"amount\":20.00}";
+
+        var first = mockMvc.perform(post("/api/wallets/me/deposit")
+                .with(user(wallet.getUser().getId().toString()))
+                .header("Idempotency-Key", key)
+                .contentType("application/json").content(request))
+                .andExpect(status().isOk()).andReturn().getResponse();
+        var conflict = mockMvc.perform(post("/api/wallets/me/deposit")
+                .with(user(other.getId().toString()))
+                .header("Idempotency-Key", key)
+                .contentType("application/json").content(request))
+                .andExpect(status().isConflict()).andReturn().getResponse();
+
+        assertThat(conflict.getContentAsString()).isNotEqualTo(first.getContentAsString());
+        assertThat(objectMapper.readTree(conflict.getContentAsString()).has("toWalletId")).isFalse();
+        assertThat(transactionRepository.count()).isEqualTo(1);
+        assertThat(walletRepository.findById(otherWallet.getId()).orElseThrow().getBalance())
+                .isEqualByComparingTo("0.00");
+    }
+
+    @Test
+    void blockedRecipientCannotReceiveTransfer() throws Exception {
+        User other = TestUsers.create("Blocked", "blocked@example.com");
+        other.setState(com.minipay.user.UserState.BLOCKED);
+        userRepository.saveAndFlush(other);
+        Wallet otherWallet = walletRepository.saveAndFlush(new Wallet(other));
+        wallet.deposit(new BigDecimal("100.00"));
+        walletRepository.saveAndFlush(wallet);
+
+        mockMvc.perform(post("/api/wallets/me/transfer")
+                .with(user(wallet.getUser().getId().toString()))
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .contentType("application/json")
+                .content("{\"amount\":20.00,\"toWalletId\":" + otherWallet.getId() + "}"))
+                .andExpect(status().isNotFound());
+
+        assertThat(transactionRepository.count()).isZero();
+        assertThat(wallet.getBalance()).isEqualByComparingTo("100.00");
+        assertThat(otherWallet.getBalance()).isEqualByComparingTo("0.00");
+    }
+
+    @Test
+    void ownHistoryIsAvailableAndForeignHistoryIsHidden() throws Exception {
+        User other = userRepository.saveAndFlush(TestUsers.create("Other", "other@example.com"));
+        String history = "/api/wallets/" + wallet.getId() + "/transactions";
+        mockMvc.perform(get("/api/wallets/me/transactions").with(user(wallet.getUser().getId().toString())))
+                .andExpect(status().isOk());
+        mockMvc.perform(get(history).with(user(other.getId().toString())))
+                .andExpect(status().isNotFound());
     }
 
 
