@@ -36,7 +36,7 @@ import com.minipay.common.exception.BalanceLimitExceededException;
 import com.minipay.idempotency.IdempotencyRecordRepository;
 import com.minipay.idempotency.IdempotencyStatus;
 import com.minipay.transaction.TransactionStatus;
-import com.minipay.common.exception.IdempotencyConflictException;
+import com.minipay.common.exception.ConflictException;
 import com.minipay.idempotency.IdempotencyResponse;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.minipay.support.PostgresTestConfiguration;
@@ -442,7 +442,7 @@ class WalletConcurrencyIntegrationTest {
         walletService.deposit(wallet.getId(), new BigDecimal("20.00"), key);
         Long originalTransactionId = history(wallet).get(0).getId();
 
-        assertThrows(IdempotencyConflictException.class,
+        assertThrows(ConflictException.class,
                 () -> walletService.deposit(wallet.getId(), new BigDecimal("50.00"), key));
 
         assertDepositStateUnchanged(originalTransactionId);
@@ -453,7 +453,7 @@ class WalletConcurrencyIntegrationTest {
         walletService.deposit(wallet.getId(), new BigDecimal("20.00"), key);
         Long originalTransactionId = history(wallet).get(0).getId();
 
-        assertThrows(IdempotencyConflictException.class,
+        assertThrows(ConflictException.class,
                 () -> walletService.deposit(secondWallet.getId(), new BigDecimal("20.00"), key));
 
         assertDepositStateUnchanged(originalTransactionId);
@@ -470,7 +470,7 @@ class WalletConcurrencyIntegrationTest {
         walletService.transfer(wallet.getId(), secondWallet.getId(), new BigDecimal("20.00"), key);
         Long originalTransactionId = history(wallet).get(0).getId();
 
-        assertThrows(IdempotencyConflictException.class,
+        assertThrows(ConflictException.class,
                 () -> walletService.transfer(wallet.getId(), thirdWallet.getId(), new BigDecimal("20.00"), key));
 
         assertBalance(wallet, "80.00");
@@ -488,7 +488,7 @@ class WalletConcurrencyIntegrationTest {
         walletService.deposit(wallet.getId(), new BigDecimal("20.00"), key);
         Long originalTransactionId = history(wallet).get(0).getId();
 
-        assertThrows(IdempotencyConflictException.class,
+        assertThrows(ConflictException.class,
                 () -> walletService.withdraw(wallet.getId(), new BigDecimal("20.00"), key));
 
         assertDepositStateUnchanged(originalTransactionId);

@@ -11,7 +11,7 @@ import org.junit.jupiter.api.Test;
 
 import com.minipay.common.exception.BalanceLimitExceededException;
 import com.minipay.common.exception.InsufficientBalanceException;
-import com.minipay.common.exception.InvalidAmountException;
+import com.minipay.common.exception.BadRequestException;
 
 class WalletTest {
 
@@ -36,7 +36,7 @@ class WalletTest {
 
         wallet.deposit(new BigDecimal("100.00"));
 
-        assertThrows(InvalidAmountException.class,
+        assertThrows(BadRequestException.class,
                 () -> wallet.deposit(new BigDecimal("-100.00")));
         assertThat(wallet.getBalance())
                 .isEqualByComparingTo(new BigDecimal("100.00"));
@@ -47,7 +47,7 @@ class WalletTest {
 
         wallet.deposit(new BigDecimal("100.00"));
 
-        assertThrows(InvalidAmountException.class,
+        assertThrows(BadRequestException.class,
                 () -> wallet.deposit(null));
         assertThat(wallet.getBalance())
                 .isEqualByComparingTo(new BigDecimal("100.00"));
@@ -58,7 +58,7 @@ class WalletTest {
 
         wallet.deposit(new BigDecimal("100.00"));
 
-        assertThrows(InvalidAmountException.class,
+        assertThrows(BadRequestException.class,
                 () -> wallet.deposit(BigDecimal.ZERO));
         assertThat(wallet.getBalance())
                 .isEqualByComparingTo(new BigDecimal("100.00"));
@@ -68,7 +68,7 @@ class WalletTest {
     void depositShouldThrowAndKeepBalanceUnchangedWhenAmountHasFractionOfCent() {
         wallet.deposit(new BigDecimal("100.00"));
 
-        InvalidAmountException exception = assertThrows(InvalidAmountException.class,
+        BadRequestException exception = assertThrows(BadRequestException.class,
                 () -> wallet.deposit(new BigDecimal("10.001")));
 
         assertEquals("Amount must not have fractions of a cent", exception.getMessage());
@@ -108,8 +108,8 @@ class WalletTest {
     void depositShouldThrowAndKeepBalanceUnchangedWhenAmountExceedsLimit() {
         wallet.deposit(new BigDecimal("100.00"));
 
-        InvalidAmountException exception = assertThrows(
-                InvalidAmountException.class,
+        BadRequestException exception = assertThrows(
+                BadRequestException.class,
                 () -> wallet.deposit(new BigDecimal("100000000000000000.00")));
             
         assertEquals("Maximum amount exceeded", exception.getMessage());
@@ -141,7 +141,7 @@ class WalletTest {
 
         wallet.deposit(new BigDecimal("100.00"));
 
-        assertThrows(InvalidAmountException.class,
+        assertThrows(BadRequestException.class,
                 () -> wallet.withdraw(new BigDecimal("-100.00")));
         assertThat(wallet.getBalance())
                 .isEqualByComparingTo(new BigDecimal("100.00"));
@@ -152,7 +152,7 @@ class WalletTest {
 
         wallet.deposit(new BigDecimal("100.00"));
 
-        assertThrows(InvalidAmountException.class,
+        assertThrows(BadRequestException.class,
                 () -> wallet.withdraw(null));
         assertThat(wallet.getBalance())
                 .isEqualByComparingTo(new BigDecimal("100.00"));
@@ -163,7 +163,7 @@ class WalletTest {
 
         wallet.deposit(new BigDecimal("100.00"));
 
-        assertThrows(InvalidAmountException.class,
+        assertThrows(BadRequestException.class,
                 () -> wallet.withdraw(BigDecimal.ZERO));
         assertThat(wallet.getBalance())
                 .isEqualByComparingTo(new BigDecimal("100.00"));
@@ -173,7 +173,7 @@ class WalletTest {
     void withdrawShouldThrowAndKeepBalanceUnchangedWhenAmountHasFractionOfCent() {
         wallet.deposit(new BigDecimal("100.00"));
 
-        assertThrows(InvalidAmountException.class,
+        assertThrows(BadRequestException.class,
                 () -> wallet.withdraw(new BigDecimal("10.001")));
         assertThat(wallet.getBalance())
                 .isEqualByComparingTo(new BigDecimal("100.00"));
@@ -192,8 +192,8 @@ class WalletTest {
     void withdrawShouldThrowAndKeepBalanceUnchangedWhenAmountExceedsLimit() {
         wallet.deposit(new BigDecimal("100.00"));
 
-        InvalidAmountException exception = assertThrows(
-                InvalidAmountException.class,
+        BadRequestException exception = assertThrows(
+                BadRequestException.class,
                 () -> wallet.withdraw(new BigDecimal("100000000000000000.00")));
             
         assertEquals("Maximum amount exceeded", exception.getMessage());

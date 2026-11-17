@@ -26,6 +26,12 @@ class RegistrationConstraintHandlingTest extends com.minipay.support.MvcSecurity
     private AuthService authService;
 
     @MockitoBean
+    private RefreshService refreshService;
+
+    @MockitoBean
+    private LogoutService logoutService;
+
+    @MockitoBean
     private com.minipay.user.UserService userService;
 
     @ParameterizedTest

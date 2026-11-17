@@ -28,9 +28,9 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import com.minipay.common.exception.BalanceLimitExceededException;
-import com.minipay.common.exception.IdempotencyConflictException;
+import com.minipay.common.exception.ConflictException;
 import com.minipay.common.exception.InsufficientBalanceException;
-import com.minipay.common.exception.InvalidAmountException;
+import com.minipay.common.exception.BadRequestException;
 import com.minipay.common.exception.SelfTransferException;
 import com.minipay.common.exception.UserNotFoundException;
 import com.minipay.common.exception.WalletAlreadyExistsException;
@@ -401,11 +401,11 @@ class WalletControllerTest extends com.minipay.support.MvcSecurityTestSupport {
     }
 
     @Test
-    void depositShouldReturnBadRequestWhenServiceThrowsInvalidAmountException()
+    void depositShouldReturnBadRequestWhenServiceThrowsBadRequestException()
             throws Exception {
         UUID key = UUID.randomUUID();
         when(walletService.depositForUser(1L, new BigDecimal("500.00"), key))
-                .thenThrow(new InvalidAmountException());
+                .thenThrow(new BadRequestException("Amount must be positive"));
 
         mockMvc.perform(post("/api/wallets/me/deposit")
                 .header("Idempotency-Key", key.toString())
@@ -841,7 +841,7 @@ class WalletControllerTest extends com.minipay.support.MvcSecurityTestSupport {
         String message = "Idempotency key has already been used with different request parameters";
 
         when(walletService.depositForUser(1L, new BigDecimal("20.00"), key))
-                .thenThrow(new IdempotencyConflictException(message));
+                .thenThrow(new ConflictException(message));
 
         mockMvc.perform(post("/api/wallets/me/deposit")
                 .header("Idempotency-Key", key.toString())

@@ -9,7 +9,7 @@ import org.springframework.stereotype.Service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.minipay.common.exception.IdempotencyConflictException;
+import com.minipay.common.exception.ConflictException;
 import com.minipay.transaction.TransactionType;
 import com.minipay.transaction.dto.TransactionResponse;
 
@@ -65,11 +65,11 @@ public class IdempotencyService {
                 idempotencyRecord.getAmount().compareTo(amount) == 0;
             
             if(!sameRequest) {
-                throw new IdempotencyConflictException("Idempotency key has already been used with different request parameters");
+                throw new ConflictException("Idempotency key has already been used with different request parameters");
             }
 
             if(!Objects.equals(IdempotencyStatus.COMPLETED, idempotencyRecord.getStatus())) {
-                throw new IdempotencyConflictException("Request is not completed");
+                throw new ConflictException("Request is not completed");
             }
 
             return new IdempotencyResponse(

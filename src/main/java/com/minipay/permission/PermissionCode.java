@@ -1,24 +1,34 @@
 package com.minipay.permission;
 
 public enum PermissionCode {
-    USER_LIST,
-    PROFILE_READ_SELF,
-    PROFILE_READ_ANY,
-    WALLET_CREATE_SELF,
-    WALLET_READ_SELF,
-    WALLET_READ_ANY,
-    WALLET_DEPOSIT_SELF,
-    WALLET_WITHDRAW_SELF,
-    WALLET_TRANSFER_SELF,
-    HISTORY_READ_SELF,
-    HISTORY_READ_ANY,
-    TRANSACTION_READ_OWN,
-    TRANSACTION_READ_ANY,
-    USER_BLOCK,
-    USER_UNBLOCK,
-    MAIN_ROLE_ASSIGN,
-    MAIN_ROLE_REMOVE,
-    EXTRA_PERMISSION_GRANT,
-    EXTRA_PERMISSION_REVOKE,
-    ACCESS_AUDIT_READ
+    USER_LIST(true),
+    PROFILE_READ_SELF(false),
+    PROFILE_READ_ANY(true),
+    WALLET_CREATE_SELF(false),
+    WALLET_READ_SELF(false),
+    WALLET_READ_ANY(true),
+    WALLET_DEPOSIT_SELF(false),
+    WALLET_WITHDRAW_SELF(false),
+    WALLET_TRANSFER_SELF(false),
+    HISTORY_READ_SELF(false),
+    HISTORY_READ_ANY(true),
+    TRANSACTION_READ_OWN(false),
+    TRANSACTION_READ_ANY(true),
+    USER_BLOCK(true),
+    USER_UNBLOCK(true),
+    MAIN_ROLE_ASSIGN(true),
+    MAIN_ROLE_REMOVE(true),
+    EXTRA_PERMISSION_GRANT(true),
+    EXTRA_PERMISSION_REVOKE(true),
+    ACCESS_AUDIT_READ(true);
+
+    private final boolean assignableToServiceRole;
+
+    PermissionCode(boolean assignableToServiceRole) {
+        this.assignableToServiceRole = assignableToServiceRole;
+    }
+
+    public boolean isAssignableToServiceRole() {
+        return assignableToServiceRole;
+    }
 }

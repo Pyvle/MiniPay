@@ -37,7 +37,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import com.minipay.common.exception.InsufficientBalanceException;
-import com.minipay.common.exception.InvalidAmountException;
+import com.minipay.common.exception.BadRequestException;
 import com.minipay.common.exception.SelfTransferException;
 import com.minipay.common.exception.UserNotFoundException;
 import com.minipay.common.exception.WalletAlreadyExistsException;
@@ -268,7 +268,7 @@ class WalletServiceTest {
     void depositShouldThrowWhenAmountIsNotPositive(String value) {
         UUID key = UUID.randomUUID();
 
-        InvalidAmountException exception = assertThrows(InvalidAmountException.class,
+        BadRequestException exception = assertThrows(BadRequestException.class,
                 () -> walletService.deposit(1L, new BigDecimal(value), key));
 
         assertEquals("Amount must be at least 0.01", exception.getMessage());
@@ -279,8 +279,8 @@ class WalletServiceTest {
     @Test
     void depositShouldThrowWhenAmountIsNull() {
         UUID key = UUID.randomUUID();
-        InvalidAmountException exception = assertThrows(
-                InvalidAmountException.class,
+        BadRequestException exception = assertThrows(
+                BadRequestException.class,
                 () -> walletService.deposit(1L, null, key));
 
         assertEquals("Amount must not be null", exception.getMessage());
@@ -362,7 +362,7 @@ class WalletServiceTest {
     void withdrawShouldThrowWhenAmountIsNotPositive(String value) {
         UUID key = UUID.randomUUID();
 
-        InvalidAmountException exception = assertThrows(InvalidAmountException.class,
+        BadRequestException exception = assertThrows(BadRequestException.class,
                 () -> walletService.withdraw(1L, new BigDecimal(value), key));
 
         assertEquals("Amount must be at least 0.01", exception.getMessage());
@@ -373,8 +373,8 @@ class WalletServiceTest {
     @Test
     void withdrawShouldThrowWhenAmountIsNull() {
         UUID key = UUID.randomUUID();
-        InvalidAmountException exception = assertThrows(
-                InvalidAmountException.class,
+        BadRequestException exception = assertThrows(
+                BadRequestException.class,
                 () -> walletService.withdraw(1L, null, key));
 
         assertEquals("Amount must not be null", exception.getMessage());
@@ -529,7 +529,7 @@ class WalletServiceTest {
     void transferShouldThrowWhenAmountIsNotPositive(String value) {
         UUID key = UUID.randomUUID();
 
-        InvalidAmountException exception = assertThrows(InvalidAmountException.class,
+        BadRequestException exception = assertThrows(BadRequestException.class,
                 () -> walletService.transfer(1L, 2L, new BigDecimal(value), key));
 
         assertEquals("Amount must be at least 0.01", exception.getMessage());
@@ -542,8 +542,8 @@ class WalletServiceTest {
     @Test
     void transferShouldThrowWhenAmountIsNull() {
         UUID key = UUID.randomUUID();
-        InvalidAmountException exception = assertThrows(
-                InvalidAmountException.class,
+        BadRequestException exception = assertThrows(
+                BadRequestException.class,
                 () -> walletService.transfer(1L, 2L, null, key));
 
         assertEquals("Amount must not be null", exception.getMessage());
@@ -556,8 +556,8 @@ class WalletServiceTest {
     @Test
     void transferShouldThrowWhenAmountHasMoreThanTwoSignificantDecimalPlaces() {
         UUID key = UUID.randomUUID();
-        InvalidAmountException exception = assertThrows(
-                InvalidAmountException.class,
+        BadRequestException exception = assertThrows(
+                BadRequestException.class,
                 () -> walletService.transfer(1L, 2L, new BigDecimal("10.001"), key));
 
         assertEquals("Amount must not have fractions of a cent", exception.getMessage());
