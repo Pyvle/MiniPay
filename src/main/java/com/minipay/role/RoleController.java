@@ -25,6 +25,7 @@ import com.minipay.role.dto.UpdateRolePermissionsRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
+import io.swagger.v3.oas.annotations.Operation;
 
 @RestController
 @RequestMapping("/api/admin/roles")
@@ -36,6 +37,7 @@ public class RoleController {
         this.roleService = roleService;
     }
 
+    @Operation(summary = "Создать служебную роль", description = "Только SUPER_ADMIN.")
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public RoleResponse createRole(@Valid @RequestBody CreateRoleRequest createRoleRequest,
@@ -53,12 +55,14 @@ public class RoleController {
                 role.getId(), role.getName(), role.getRank(), permissionCodes);
     }
 
+    @Operation(summary = "Получить список служебных ролей", description = "Только SUPER_ADMIN.")
     @GetMapping
     public List<RoleResponse> listRoles(Authentication authentication) {
         Long userId = Long.valueOf(authentication.getName());
         return roleService.listRoles(userId);
     }
 
+    @Operation(summary = "Переименовать служебную роль", description = "Только SUPER_ADMIN.")
     @PatchMapping("/{id}/name")
     public RoleResponse renameRole(@PathVariable("id") Long roleId,
             @Valid @RequestBody RenameRoleRequest request, Authentication authentication) {
@@ -66,12 +70,14 @@ public class RoleController {
         return roleService.renameRole(actorId, roleId, request.name());
     }
 
+    @Operation(summary = "Изменить ранг служебной роли", description = "Только SUPER_ADMIN.")
     @PatchMapping("/{id}/rank")
     public RoleResponse updateRank(@PathVariable("id") Long roleId,
             @Valid @RequestBody UpdateRankRequest request, Authentication authentication) {
         return roleService.updateRank(Long.valueOf(authentication.getName()), roleId, request.rank());
     }
 
+    @Operation(summary = "Заменить список ролей для назначения и управления", description = "Только SUPER_ADMIN.")
     @PutMapping("/{id}/assignable-roles")
     public RoleOptionsResponse updateAssignableRoles(@PathVariable("id") Long roleId,
             @Valid @RequestBody UpdateAssignableRolesRequest request, Authentication authentication) {
@@ -79,6 +85,7 @@ public class RoleController {
                 Long.valueOf(authentication.getName()), roleId, request.roleIds());
     }
 
+    @Operation(summary = "Заменить список прав, которые сотрудник может выдавать", description = "Только SUPER_ADMIN.")
     @PutMapping("/{id}/grantable-permissions")
     public RoleOptionsResponse updateGrantablePermissions(@PathVariable("id") Long roleId,
             @Valid @RequestBody UpdateRolePermissionsRequest request, Authentication authentication) {
@@ -86,12 +93,15 @@ public class RoleController {
                 Long.valueOf(authentication.getName()), roleId, request.permissionCodes());
     }
 
+    @Operation(summary = "Удалить служебную роль", description = "Только SUPER_ADMIN. Роль не должна быть назначена пользователям.")
     @DeleteMapping("/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void deleteRole(@PathVariable("id") Long roleId, Authentication authentication) {
         roleService.deleteRole(Long.valueOf(authentication.getName()), roleId);
     }
 
+    @Operation(summary = "Посмотреть доступные роли и права для выдачи",
+            description = "SUPER_ADMIN видит полный каталог. Сотрудник видит варианты из списка своей роли.")
     @GetMapping("/options")
     public RoleOptionsResponse roleOptions(Authentication authentication) {
         return roleService.roleOptions(Long.valueOf(authentication.getName()));
@@ -101,6 +111,7 @@ public class RoleController {
 
     public record UpdateAssignableRolesRequest(@NotNull List<@NotNull @Positive Long> roleIds) {}
 
+    @Operation(summary = "Заменить собственные права роли", description = "Только SUPER_ADMIN.")
     @PutMapping("/{id}/permissions")
     public RoleResponse updateRolePermissions(
             @PathVariable("id") Long roleId,

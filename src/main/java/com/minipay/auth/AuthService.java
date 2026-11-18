@@ -3,6 +3,7 @@ package com.minipay.auth;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Locale;
+import java.util.UUID;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -26,6 +27,7 @@ import com.minipay.user.UserState;
 public class AuthService {
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
+    private final String dummyPasswordHash;
     private final SessionRepository sessionRepository;
     private final RefreshTokenService refreshTokenService;
     private final RefreshTokenRepository refreshTokenRepository;
@@ -42,6 +44,7 @@ public class AuthService {
             @Value("${app.auth.access-token-ttl}") Duration accessTokenTtl) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
+        this.dummyPasswordHash = passwordEncoder.encode(UUID.randomUUID().toString());
         this.sessionRepository = sessionRepository;
         this.refreshTokenService = refreshTokenService;
         this.refreshTokenRepository = refreshTokenRepository;
@@ -53,10 +56,11 @@ public class AuthService {
     @Transactional
     public LoginResponse login(String email, String password) {
         String normalizedEmail = email.strip().toLowerCase(Locale.ROOT);
-        User user = userRepository.findByEmailForUpdate(normalizedEmail)
-                .orElseThrow(InvalidCredentialsException::new);
-        if (!passwordEncoder.matches(password, user.getPasswordHash())
-                || user.getState() != UserState.ACTIVE) {
+        User user = userRepository.findByEmailForUpdate(normalizedEmail).orElse(null);
+        // Run password verification even when the email does not exist.
+        String passwordHash = user == null ? dummyPasswordHash : user.getPasswordHash();
+        boolean passwordMatches = passwordEncoder.matches(password, passwordHash);
+        if (user == null || !passwordMatches || user.getState() != UserState.ACTIVE) {
             throw new InvalidCredentialsException();
         }
 

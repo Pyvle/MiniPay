@@ -61,9 +61,7 @@ public class RoleService {
         var after = permissionSnapshot(permissionCodes(saved.getPermissions()))
                 .put("name", saved.getName())
                 .put("rank", saved.getRank());
-        accessAuditRepository.save(new AccessAudit(
-                Instant.now(), userId, ActorSource.USER, "ROLE_CREATE",
-                null, saved.getId(), null, after));
+        audit(Instant.now(), userId, saved.getId(), "ROLE_CREATE", null, after);
         return saved;
     }
 
@@ -119,8 +117,7 @@ public class RoleService {
             }
             sessionRevocationService.revokeAllForUser(employee.getId(), "ROLE_PERMISSIONS_UPDATE");
         }
-        accessAuditRepository.save(new AccessAudit(now, actorId, ActorSource.USER, "ROLE_PERMISSIONS_UPDATE",
-                null, roleId, permissionSnapshot(beforeCodes), after));
+        audit(now, actorId, roleId, "ROLE_PERMISSIONS_UPDATE", permissionSnapshot(beforeCodes), after);
         return toResponse(role);
     }
 
@@ -159,10 +156,8 @@ public class RoleService {
         role.setName(name);
         roleRepository.flush();
         var json = JsonNodeFactory.instance;
-        accessAuditRepository.save(new AccessAudit(
-                Instant.now(), actorId, ActorSource.USER, "ROLE_RENAME",
-                null, roleId, json.objectNode().put("name", oldName),
-                json.objectNode().put("name", name)));
+        audit(Instant.now(), actorId, roleId, "ROLE_RENAME",
+                json.objectNode().put("name", oldName), json.objectNode().put("name", name));
         return toResponse(role);
     }
 
@@ -244,7 +239,7 @@ public class RoleService {
                 .get("permissionCodes"));
         roleRepository.flush();
         roleRepository.delete(target);
-        audit(actorId, target, "ROLE_DELETE", before, null);
+        audit(Instant.now(), actorId, roleId, "ROLE_DELETE", before, null);
     }
 
     @Transactional(readOnly = true)
@@ -295,13 +290,13 @@ public class RoleService {
         for (User employee : userRepository.findByMainRoleIdForUpdate(role.getId())) {
             sessionRevocationService.revokeAllForUser(employee.getId(), action);
         }
-        audit(actorId, role, action, before, after);
+        audit(Instant.now(), actorId, role.getId(), action, before, after);
     }
 
-    private void audit(Long actorId, Role role, String action,
+    private void audit(Instant createdAt, Long actorId, Long roleId, String action,
             com.fasterxml.jackson.databind.JsonNode before, com.fasterxml.jackson.databind.JsonNode after) {
-        accessAuditRepository.save(new AccessAudit(Instant.now(), actorId, ActorSource.USER,
-                action, null, role.getId(), before, after));
+        accessAuditRepository.save(new AccessAudit(createdAt, actorId, ActorSource.USER,
+                action, null, roleId, before, after));
     }
 
     private RoleResponse toResponse(Role role) {

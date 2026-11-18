@@ -25,6 +25,22 @@ Copy-Item .env.example .env
 | `DB_USERNAME` | Пользователь PostgreSQL; Compose передаёт его БД и приложению |
 | `DB_PASSWORD` | Пароль этого пользователя; замени заглушку своим локальным паролем |
 | `DB_URL` | JDBC-адрес для запуска приложения вне Docker |
+| `JWT_SECRET` | Секрет подписи JWT в Base64, минимум 32 случайных байта до кодирования. Compose передаёт его контейнеру MiniPay. |
+
+Замени заглушку `JWT_SECRET` в `.env` сгенерированным значением. В PowerShell можно получить его так:
+
+```powershell
+$keyBytes = New-Object byte[] 32
+$rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+try {
+    $rng.GetBytes($keyBytes)
+    [Convert]::ToBase64String($keyBytes)
+} finally {
+    $rng.Dispose()
+}
+```
+
+Храни секрет между перезапусками. После его смены ранее выданные access token перестанут проходить проверку подписи.
 
 База в Compose называется `minipay`. Контейнер MiniPay получает адрес `jdbc:postgresql://postgres:5432/minipay` из `compose.yaml`, независимо от `DB_URL` в `.env`.
 
@@ -92,6 +108,42 @@ docker compose down -v
 
 ## Основные правила API
 
+### Вход и сессии
+
+| Запрос | Тело и результат |
+| --- | --- |
+| `POST /api/auth/register` | `{"name":"Test User","email":"user@example.com","password":"<password>"}` → `201` и профиль |
+| `POST /api/auth/login` | `{"email":"user@example.com","password":"<password>"}` → `200`, `accessToken` и `refreshToken` со сроками действия |
+| `GET /api/auth/me` | Bearer access token → `200` и профиль текущего пользователя |
+| `POST /api/auth/refresh` | `{"refreshToken":"<refresh_token>"}` → `200` и новая пара токенов |
+| `POST /api/auth/logout` | `{"refreshToken":"<refresh_token>"}` → `204` и отзыв текущей сессии |
+
+Для защищённых маршрутов используй заголовок `Authorization: Bearer <access_token>`. В Swagger UI нажми **Authorize** и вставь только значение access token. Для регистрации, входа, refresh и logout заголовок не нужен. Если Swagger UI подставляет истёкший JWT, очисти его через **Authorize** перед обновлением.
+
+Access token действует 15 минут, сессия — до 7 дней. После refresh замени оба токена на новые. Повторное предъявление уже использованного refresh token отзывает соответствующую сессию. После отзыва при изменении доступа или восстановлении аккаунта требуется новый вход. Разблокировка разрешает новый вход, прежние сессии остаются отозванными.
+
+Ошибки возвращаются в формате `ErrorResponse`. `401` означает, что аутентификация не пройдена, `403` — недостаточно полномочий для действия, `404` — объект отсутствует или скрыт правилами доступа, `409` — конфликт с текущим состоянием, например занятое имя роли или повтор ключа с другими параметрами.
+
+### Администрирование
+
+- `/api/admin/roles` — каталог и настройка служебных ролей. `GET /api/admin/roles/options` возвращает доступные варианты назначения и выдачи прав.
+- `/api/admin/users/{userId}` — назначение и снятие основной роли, выдача и снятие дополнительных прав, блокировка и разблокировка, назначение и снятие статуса `SUPER_ADMIN`. Для руководителей действуют право на операцию, ранг и зона управления.
+- `GET /api/admin/access-audit?page=0&size=20` — журнал изменений для `SUPER_ADMIN` и сотрудников с `ACCESS_AUDIT_READ`. События отсортированы от новых к старым, допустимый размер страницы — от 1 до 100.
+
+Первого `SUPER_ADMIN` создаёт команда `init`. Команда `recover` меняет пароль существующего `SUPER_ADMIN`, снимает блокировку и отзывает его сессии. Обе команды запрашивают данные в интерактивной консоли, пароль вводится скрыто.
+
+```powershell
+docker compose run --rm minipay --app.command=init
+docker compose run --rm minipay --app.command=recover
+```
+
+Для запуска вне Docker сначала собери JAR через `.\gradlew.bat bootJar` и запускай его из корня проекта с настроенным `.env`:
+
+```powershell
+java -jar build/libs/minipay-0.0.1-SNAPSHOT.jar --app.command=init
+java -jar build/libs/minipay-0.0.1-SNAPSHOT.jar --app.command=recover
+```
+
 ### Денежные операции
 
 Кошелёк создаётся запросом `POST /api/wallets/me` без тела. `GET /api/wallets/me` возвращает кошелёк вошедшего пользователя. Для пополнения, снятия и перевода используются `POST /api/wallets/me/deposit`, `POST /api/wallets/me/withdraw` и `POST /api/wallets/me/transfer`. Кошелёк, с которого выполняется операция, определяется по токену; для перевода в теле передаётся только ID кошелька получателя и сумма.
@@ -118,4 +170,4 @@ docker compose down -v
 
 ## Дальнейшее развитие
 
-Аутентификация и доступ только к своим кошелькам, роли, администрирование и пользовательский интерфейс. Дополнительно — merchant-сценарии, счета, возвраты и аудит.
+Пользовательский интерфейс, merchant-сценарии, счета и возвраты.

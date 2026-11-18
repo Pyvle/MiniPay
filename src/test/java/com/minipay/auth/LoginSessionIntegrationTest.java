@@ -21,12 +21,17 @@ import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.transaction.annotation.Transactional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNotNull;
+import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest(properties = "app.auth.session-ttl=7d")
@@ -41,7 +46,7 @@ class LoginSessionIntegrationTest {
     @Autowired private ObjectMapper objectMapper;
     @Autowired private UserRepository userRepository;
     @Autowired private SessionRepository sessionRepository;
-    @Autowired private PasswordEncoder passwordEncoder;
+    @MockitoSpyBean private PasswordEncoder passwordEncoder;
     @Autowired private EntityManager entityManager;
 
     @Test
@@ -86,7 +91,10 @@ class LoginSessionIntegrationTest {
             throws Exception {
         account("alice@example.com", state);
 
-        login(email, password).andExpect(status().isUnauthorized());
+        login(email, password)
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.message").value("Invalid email or password"));
+        verify(passwordEncoder).matches(eq(password), isNotNull());
         flushAndClear();
 
         assertThat(sessionRepository.count()).isZero();
