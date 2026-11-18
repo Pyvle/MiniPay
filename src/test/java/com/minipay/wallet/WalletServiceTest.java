@@ -18,6 +18,7 @@ import static org.mockito.Mockito.when;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.math.BigDecimal;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Supplier;
@@ -72,6 +73,15 @@ class WalletServiceTest {
     // Execute the callback so these tests still exercise wallet business logic.
     private void executeOperation(UUID key, TransactionType type, Long walletId,
             Long toWalletId, BigDecimal amount) {
+        when(walletRepository.findOwnerId(walletId)).thenReturn(Optional.of(walletId));
+        User owner = activeOwner(walletId);
+        if (toWalletId == null) {
+            when(userRepository.findAllByIdsForUpdate(List.of(walletId))).thenReturn(List.of(owner));
+        } else {
+            when(walletRepository.findOwnerId(toWalletId)).thenReturn(Optional.of(toWalletId));
+            when(userRepository.findAllByIdsForUpdate(List.of(walletId, toWalletId)))
+                    .thenReturn(List.of(owner, activeOwner(toWalletId)));
+        }
         when(idempotencyService.execute(eq(key), eq(type), eq(walletId),
                 eq(toWalletId), eq(amount), any()))
                 .thenAnswer(invocation -> {
@@ -79,6 +89,12 @@ class WalletServiceTest {
                     return new IdempotencyResponse(200,
                             objectMapper.writeValueAsString(operation.get()));
                 });
+    }
+
+    private User activeOwner(Long id) {
+        User user = new User();
+        ReflectionTestUtils.setField(user, "id", id);
+        return user;
     }
 
     private void assertResponseTransaction(IdempotencyResponse response, TransactionType type, String amount) throws Exception {
@@ -294,10 +310,8 @@ class WalletServiceTest {
     void depositShouldThrowWhenWalletNotFound() {
         UUID key = UUID.randomUUID();
 
-        executeOperation(key, TransactionType.DEPOSIT, 999L, null, new BigDecimal("100.00"));
+        when(walletRepository.findOwnerId(999L)).thenReturn(Optional.empty());
 
-        when(walletRepository.findByIdForUpdate(999L))
-                .thenReturn(Optional.empty());
 
         WalletNotFoundException exception = assertThrows(WalletNotFoundException.class,
                 () -> walletService.deposit(999L, new BigDecimal("100.00"), key));
@@ -344,10 +358,9 @@ class WalletServiceTest {
     @Test
     void withdrawShouldThrowWhenWalletNotFound() {
         UUID key = UUID.randomUUID();
-        executeOperation(key, TransactionType.WITHDRAWAL, 999L, null, new BigDecimal("100.00"));
 
-        when(walletRepository.findByIdForUpdate(999L))
-                .thenReturn(Optional.empty());
+        when(walletRepository.findOwnerId(999L)).thenReturn(Optional.empty());
+
 
         WalletNotFoundException exception = assertThrows(WalletNotFoundException.class,
                 () -> walletService.withdraw(999L, new BigDecimal("100.00"), key));
@@ -471,20 +484,14 @@ class WalletServiceTest {
     @Test
     void transferShouldThrowWhenSourceWalletNotFound() {
         UUID key = UUID.randomUUID();
-        executeOperation(key, TransactionType.TRANSFER, 999L, 1L, new BigDecimal("100.00"));
 
-        when(walletRepository.findByIdForUpdate(1L))
-                .thenReturn(Optional.of(new Wallet()));
+        when(walletRepository.findOwnerId(999L)).thenReturn(Optional.empty());
 
-        when(walletRepository.findByIdForUpdate(999L))
-                .thenReturn(Optional.empty());
 
         WalletNotFoundException exception = assertThrows(WalletNotFoundException.class,
                 () -> walletService.transfer(999L, 1L, new BigDecimal("100.00"), key));
 
         assertEquals("Wallet not found: 999", exception.getMessage());
-        verify(walletRepository).findByIdForUpdate(1L);
-        verify(walletRepository).findByIdForUpdate(999L);
         verify(walletRepository, never()).save(any(Wallet.class));
         verify(transactionRepository, never()).save(any(Transaction.class));
     }
@@ -492,21 +499,15 @@ class WalletServiceTest {
     @Test
     void transferShouldThrowWhenDestinationWalletNotFound() {
         UUID key = UUID.randomUUID();
-        Wallet wallet = new Wallet();
 
-        executeOperation(key, TransactionType.TRANSFER, 1L, 999L, new BigDecimal("100.00"));
+        when(walletRepository.findOwnerId(1L)).thenReturn(Optional.of(1L));
+        when(walletRepository.findOwnerId(999L)).thenReturn(Optional.empty());
 
-        when(walletRepository.findByIdForUpdate(999L))
-                .thenReturn((Optional.empty()));
-        when(walletRepository.findByIdForUpdate(1L))
-                .thenReturn((Optional.of(wallet)));
 
         WalletNotFoundException exception = assertThrows(WalletNotFoundException.class,
                 () -> walletService.transfer(1L, 999L, new BigDecimal("100.00"), key));
 
         assertEquals("Wallet not found: 999", exception.getMessage());
-        verify(walletRepository).findByIdForUpdate(1L);
-        verify(walletRepository).findByIdForUpdate(999L);
         verify(walletRepository, never()).save(any(Wallet.class));
         verify(transactionRepository, never()).save(any(Transaction.class));
     }

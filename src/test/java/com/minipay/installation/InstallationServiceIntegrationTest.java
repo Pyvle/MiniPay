@@ -38,7 +38,6 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.reset;
 
-// Без тестовой @Transactional: проверяем commit/rollback транзакции сервиса.
 @SpringBootTest(properties = "app.command=none")
 @ActiveProfiles("test")
 @Import(PostgresTestConfiguration.class)
@@ -62,7 +61,6 @@ class InstallationServiceIntegrationTest {
     }
 
     private void clearDatabase() {
-        // Этот контекст использует отдельную PostgreSQL из Testcontainers.
         jdbc.execute("TRUNCATE users, wallets, transactions, idempotency_records, "
                 + "roles, role_permissions, user_extra_permissions, role_assignable_roles, "
                 + "role_grantable_permissions, sessions, refresh_tokens, access_audit, installation_state");
@@ -177,7 +175,6 @@ class InstallationServiceIntegrationTest {
                     future.get(30, TimeUnit.SECONDS);
                     successes++;
                 } catch (ExecutionException failure) {
-                    // Реальный проигравший INSERT должен нарушить PK installation_state.
                     Throwable cause = failure.getCause();
                     boolean stateConflict = false;
                     while (cause != null) {

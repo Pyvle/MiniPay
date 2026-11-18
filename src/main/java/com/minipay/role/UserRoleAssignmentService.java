@@ -94,7 +94,6 @@ public class UserRoleAssignmentService {
     }
 
     private Change authorize(Long actorId, Long userId, PermissionCode action, boolean allowUnassigned) {
-        // Same ordering as role configuration: roles, then users, then sessions.
         var lockedRoles = roles.findAllForUpdate();
         var lockedUsers = users.findAllByIdsForUpdate(List.of(actorId, userId));
         User actor = lockedUsers.stream().filter(u -> u.getId().equals(actorId))

@@ -17,8 +17,8 @@ public interface WalletRepository extends JpaRepository<Wallet, Long> {
     @Query("select w.id from Wallet w where w.user.id = :userId")
     Optional<Long> findIdByUserId(@Param("userId") Long userId);
 
-    @Query("select w.user.state from Wallet w where w.id = :walletId")
-    Optional<com.minipay.user.UserState> findOwnerState(@Param("walletId") Long walletId);
+    @Query("select w.user.id from Wallet w where w.id = :walletId")
+    Optional<Long> findOwnerId(@Param("walletId") Long walletId);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select w from Wallet w where w.id = :id")

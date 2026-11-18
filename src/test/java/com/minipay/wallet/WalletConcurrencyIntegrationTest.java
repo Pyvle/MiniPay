@@ -23,10 +23,13 @@ import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.dao.PessimisticLockingFailureException;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -37,6 +40,7 @@ import com.minipay.idempotency.IdempotencyRecordRepository;
 import com.minipay.idempotency.IdempotencyStatus;
 import com.minipay.transaction.TransactionStatus;
 import com.minipay.common.exception.ConflictException;
+import com.minipay.common.exception.WalletNotFoundException;
 import com.minipay.idempotency.IdempotencyResponse;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.minipay.support.PostgresTestConfiguration;
@@ -44,7 +48,10 @@ import com.minipay.transaction.Transaction;
 import com.minipay.transaction.TransactionRepository;
 import com.minipay.transaction.TransactionType;
 import com.minipay.user.User;
+import com.minipay.user.SystemRole;
+import com.minipay.user.UserBlockingService;
 import com.minipay.user.UserRepository;
+import com.minipay.user.UserState;
 
 @ActiveProfiles("test")
 @SpringBootTest(properties = "spring.jpa.hibernate.ddl-auto=validate")
@@ -81,6 +88,10 @@ class WalletConcurrencyIntegrationTest {
 
     private TransactionTemplate transactionTemplate;
 
+    @Autowired private UserBlockingService userBlockingService;
+    @Autowired private JdbcTemplate jdbc;
+    private Long blockingAdminId;
+
     @BeforeEach
     void setUp() {
         transactionTemplate = new TransactionTemplate(transactionManager);
@@ -108,6 +119,10 @@ class WalletConcurrencyIntegrationTest {
             deleteWalletTestData(wallet);
             deleteWalletTestData(secondWallet);
             deleteWalletTestData(thirdWallet);
+            if (blockingAdminId != null) {
+                jdbc.update("DELETE FROM access_audit WHERE actor_user_id = ?", blockingAdminId);
+                userRepository.deleteById(blockingAdminId);
+            }
         });
         assertThat(idempotencyRecordRepository.findAllById(usedKeys)).isEmpty();
     }
@@ -132,6 +147,85 @@ class WalletConcurrencyIntegrationTest {
             walletRepository.flush();
             userRepository.deleteById(userId);
         }
+    }
+
+    @ParameterizedTest(name = "blocked participant: {0}")
+    @ValueSource(strings = {"sender", "recipient"})
+    void transferWaitingForBlockIsRejected(String participant) throws Exception {
+        Long targetId = blockingTarget(participant);
+        try (var executor = Executors.newSingleThreadExecutor()) {
+            var waitingTransfer = transactionTemplate.execute(status -> {
+                userBlockingService.block(blockingAdminId, targetId);
+                return submitBlockedOperation(executor, this::transfer);
+            });
+            var failure = assertThrows(ExecutionException.class, () -> waitingTransfer.get(15, TimeUnit.SECONDS));
+            assertThat(failure.getCause()).isInstanceOf(WalletNotFoundException.class);
+        }
+        assertThat(userRepository.findById(targetId).orElseThrow().getState()).isEqualTo(UserState.BLOCKED);
+        assertBalance(wallet, "100.00");
+        assertBalance(secondWallet, "100.00");
+        assertThat(history(wallet)).isEmpty();
+        assertThat(history(secondWallet)).isEmpty();
+        assertThat(idempotencyRecordRepository.findById(key)).isEmpty();
+    }
+
+    @ParameterizedTest(name = "blocked participant: {0}")
+    @ValueSource(strings = {"sender", "recipient"})
+    void blockWaitingForTransferPreservesCompletedTransfer(String participant) throws Exception {
+        Long targetId = blockingTarget(participant);
+        try (var executor = Executors.newSingleThreadExecutor()) {
+            var waitingBlock = transactionTemplate.execute(status -> {
+                transfer();
+                return submitBlockedOperation(executor, () -> userBlockingService.block(blockingAdminId, targetId));
+            });
+            waitingBlock.get(15, TimeUnit.SECONDS);
+        }
+
+        assertThat(userRepository.findById(targetId).orElseThrow().getState()).isEqualTo(UserState.BLOCKED);
+        UUID nextKey = newRequestKey();
+        assertThrows(WalletNotFoundException.class,
+                () -> walletService.transfer(wallet.getId(), secondWallet.getId(), new BigDecimal("20.00"), nextKey));
+        assertThat(idempotencyRecordRepository.findById(nextKey)).isEmpty();
+        assertBalance(wallet, "80.00");
+        assertBalance(secondWallet, "120.00");
+        assertSingleOperation(wallet, TransactionType.TRANSFER, "20.00");
+        assertSingleOperation(secondWallet, TransactionType.TRANSFER, "20.00");
+    }
+
+    private Long blockingTarget(String participant) {
+        User admin = TestUsers.create("Blocking admin", UUID.randomUUID() + "@example.com");
+        admin.setSystemRole(SystemRole.SUPER_ADMIN);
+        blockingAdminId = userRepository.saveAndFlush(admin).getId();
+        return ("sender".equals(participant) ? wallet : secondWallet).getUser().getId();
+    }
+
+    private void transfer() {
+        walletService.transfer(wallet.getId(), secondWallet.getId(), new BigDecimal("20.00"), key);
+    }
+
+    private Future<?> submitBlockedOperation(ExecutorService executor, Runnable operation) {
+        int blockerPid = jdbc.queryForObject("SELECT pg_backend_pid()", Integer.class);
+        var waiting = executor.submit(() -> transactionTemplate.executeWithoutResult(status -> {
+            jdbc.execute("SET LOCAL lock_timeout = '12s'");
+            operation.run();
+        }));
+        // Poll in the lock holder's transaction so it cannot commit before contention is observed.
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(8);
+        while (System.nanoTime() < deadline && !waiting.isDone()) {
+            if (Boolean.TRUE.equals(jdbc.queryForObject("""
+                    SELECT EXISTS (SELECT 1 FROM pg_stat_activity
+                    WHERE ? = ANY(pg_blocking_pids(pid)))
+                    """, Boolean.class, blockerPid))) {
+                return waiting;
+            }
+            try {
+                Thread.sleep(25);
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                throw new AssertionError("Interrupted while waiting for a database lock", exception);
+            }
+        }
+        throw new AssertionError("Concurrent transaction did not wait for the database lock");
     }
 
     @Test

@@ -1,6 +1,8 @@
 package com.minipay.role;
 
 import com.minipay.permission.PermissionCode;
+import com.minipay.user.SuperAdminService;
+import com.minipay.user.UserBlockingService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
@@ -12,9 +14,39 @@ import org.springframework.web.bind.annotation.*;
 @RequestMapping("/api/admin/users/{userId}")
 public class UserRoleAssignmentController {
     private final UserRoleAssignmentService assignments;
+    private final UserBlockingService blocking;
+    private final SuperAdminService superAdmins;
 
-    public UserRoleAssignmentController(UserRoleAssignmentService assignments) {
+    public UserRoleAssignmentController(UserRoleAssignmentService assignments, UserBlockingService blocking,
+            SuperAdminService superAdmins) {
         this.assignments = assignments;
+        this.blocking = blocking;
+        this.superAdmins = superAdmins;
+    }
+
+    @PutMapping("/super-admin")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void promote(@PathVariable("userId") Long userId, Authentication authentication) {
+        superAdmins.promoteToSuperAdmin(actorId(authentication), userId);
+    }
+
+    @DeleteMapping("/super-admin")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void removeSuperAdmin(@PathVariable("userId") Long userId, Authentication authentication) {
+        superAdmins.removeSuperAdmin(actorId(authentication), userId);
+    }
+
+    @PostMapping("/block")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void block(@PathVariable("userId") Long userId, Authentication authentication) {
+        blocking.block(actorId(authentication), userId);
+    }
+
+    @PostMapping("/unblock")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void unblock(@PathVariable("userId") Long userId,
+            Authentication authentication) {
+        blocking.unblock(actorId(authentication), userId);
     }
 
     @PutMapping("/main-role")
@@ -48,5 +80,6 @@ public class UserRoleAssignmentController {
         return Long.valueOf(authentication.getName());
     }
 
-    public record MainRoleRequest(@NotNull @Positive Long roleId) {}
+    public record MainRoleRequest(@NotNull @Positive Long roleId) {
+    }
 }

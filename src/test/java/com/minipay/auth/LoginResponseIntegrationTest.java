@@ -43,7 +43,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest(properties = {
         "app.auth.session-ttl=7d",
         "app.auth.access-token-ttl=15m",
-        // Public test-only key: Base64 of the 32 ASCII bytes below.
         "app.auth.jwt-secret=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
 })
 @AutoConfigureMockMvc
@@ -142,7 +141,6 @@ class LoginResponseIntegrationTest {
 
     @Test
     void jwtIssuanceFailureShouldRollBackSessionAndRefreshToken() throws Exception {
-        // No test transaction: observe the real rollback of AuthService.login.
         long previousTokenCount = jdbc.queryForObject("SELECT count(*) FROM refresh_tokens", Long.class);
         doAnswer(invocation -> {
             Long sessionId = invocation.getArgument(1);

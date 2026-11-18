@@ -174,6 +174,35 @@ class WalletServiceIntegrationTest {
     }
 
     @Test
+    void completedTransferCannotBeReplayedAfterRecipientIsBlocked() throws Exception {
+        User recipient = userRepository.saveAndFlush(TestUsers.create("Recipient", "recipient@example.com"));
+        Wallet recipientWallet = walletRepository.saveAndFlush(new Wallet(recipient));
+        wallet.deposit(new BigDecimal("100.00"));
+        walletRepository.saveAndFlush(wallet);
+        String key = UUID.randomUUID().toString();
+        String payload = "{\"amount\":20.00,\"toWalletId\":" + recipientWallet.getId() + "}";
+        Long senderId = wallet.getUser().getId();
+
+        mockMvc.perform(post("/api/wallets/me/transfer").with(user(senderId.toString()))
+                .header("Idempotency-Key", key).contentType("application/json").content(payload))
+                .andExpect(status().isOk());
+
+        recipient.setState(com.minipay.user.UserState.BLOCKED);
+        userRepository.saveAndFlush(recipient);
+        entityManager.clear();
+
+        var replay = mockMvc.perform(post("/api/wallets/me/transfer").with(user(senderId.toString()))
+                .header("Idempotency-Key", key).contentType("application/json").content(payload))
+                .andExpect(status().isNotFound()).andReturn().getResponse();
+        assertThat(objectMapper.readTree(replay.getContentAsString()).has("toWalletId")).isFalse();
+        assertThat(transactionRepository.count()).isEqualTo(1L);
+        assertThat(walletRepository.findById(wallet.getId()).orElseThrow().getBalance())
+                .isEqualByComparingTo("80.00");
+        assertThat(walletRepository.findById(recipientWallet.getId()).orElseThrow().getBalance())
+                .isEqualByComparingTo("20.00");
+    }
+
+    @Test
     void ownHistoryIsAvailableAndForeignHistoryIsHidden() throws Exception {
         User other = userRepository.saveAndFlush(TestUsers.create("Other", "other@example.com"));
         String history = "/api/wallets/" + wallet.getId() + "/transactions";

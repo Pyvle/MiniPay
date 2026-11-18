@@ -441,6 +441,320 @@ class RoleCreationIntegrationTest {
         }
     }
 
+    @Test
+    void managerCanBlockLowerRankedEmployeeInScope() throws Exception {
+        var admin = login(true);
+        long managerRole = trackedRole(admin, "Block Manager", 30, List.of("USER_BLOCK"));
+        long employeeRole = trackedRole(admin, "Block Employee", 10, List.of());
+        configureManager(managerRole, List.of(employeeRole), admin);
+        var manager = login(false, managerRole);
+        var employee = login(false, employeeRole);
+
+        mvc.perform(post("/api/admin/users/{userId}/block", employee.id())
+                .header("Authorization", "Bearer " + manager.token()))
+                .andExpect(status().isNoContent());
+        assertThat(jdbc.queryForObject("SELECT state FROM users WHERE id = ?", String.class, employee.id()))
+                .isEqualTo("BLOCKED");
+        assertThat(jdbc.queryForObject("""
+                SELECT count(*) FROM access_audit
+                WHERE action = 'USER_BLOCK' AND actor_user_id = ? AND target_user_id = ?
+                """, Long.class, manager.id(), employee.id())).isEqualTo(1L);
+        mvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + employee.token()))
+                .andExpect(status().isUnauthorized());
+        mvc.perform(post("/api/auth/refresh").contentType(MediaType.APPLICATION_JSON)
+                .content(mapper.writeValueAsString(Map.of("refreshToken", employee.refreshToken()))))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void managerCannotBlockEqualRankedEmployeeEvenInScope() throws Exception {
+        var admin = login(true);
+        long managerRole = trackedRole(admin, "Block Manager", 30, List.of("USER_BLOCK"));
+        long employeeRole = trackedRole(admin, "Equal Employee", 30, List.of());
+        configureManager(managerRole, List.of(employeeRole), admin);
+        var manager = login(false, managerRole);
+        var employee = login(false, employeeRole);
+
+        mvc.perform(post("/api/admin/users/{userId}/block", employee.id())
+                .header("Authorization", "Bearer " + manager.token()))
+                .andExpect(status().isForbidden());
+        assertThat(jdbc.queryForObject("SELECT state FROM users WHERE id = ?", String.class, employee.id()))
+                .isEqualTo("ACTIVE");
+        assertThat(jdbc.queryForObject("""
+                SELECT count(*) FROM access_audit WHERE action = 'USER_BLOCK' AND target_user_id = ?
+                """, Long.class, employee.id())).isZero();
+        mvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + employee.token()))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void managerCanUnblockEmployeeWithoutRestoringOldSessions() throws Exception {
+        var admin = login(true);
+        long managerRole = trackedRole(admin, "Unblock Manager", 30, List.of("USER_UNBLOCK"));
+        long employeeRole = trackedRole(admin, "Unblock Employee", 10, List.of());
+        configureManager(managerRole, List.of(employeeRole), admin);
+        var manager = login(false, managerRole);
+        var employee = login(false, employeeRole);
+        String email = jdbc.queryForObject("SELECT email FROM users WHERE id = ?", String.class, employee.id());
+
+        mvc.perform(post("/api/admin/users/{userId}/block", employee.id())
+                .header("Authorization", "Bearer " + admin.token()))
+                .andExpect(status().isNoContent());
+        for (int attempt = 0; attempt < 2; attempt++) {
+            mvc.perform(post("/api/admin/users/{userId}/unblock", employee.id())
+                    .header("Authorization", "Bearer " + manager.token()))
+                    .andExpect(status().isNoContent());
+        }
+
+        assertThat(jdbc.queryForObject("SELECT state FROM users WHERE id = ?", String.class, employee.id()))
+                .isEqualTo("ACTIVE");
+        assertThat(jdbc.queryForList("""
+                SELECT actor_user_id FROM access_audit
+                WHERE action = 'USER_UNBLOCK' AND target_user_id = ?
+                """, Long.class, employee.id())).containsExactly(manager.id());
+        mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
+                .content(mapper.writeValueAsString(Map.of("email", email, "password", PASSWORD))))
+                .andExpect(status().isOk());
+        mvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + employee.token()))
+                .andExpect(status().isUnauthorized());
+        mvc.perform(post("/api/auth/refresh").contentType(MediaType.APPLICATION_JSON)
+                .content(mapper.writeValueAsString(Map.of("refreshToken", employee.refreshToken()))))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void managerWithOnlyBlockPermissionCannotUnblockEmployee() throws Exception {
+        var admin = login(true);
+        long managerRole = trackedRole(admin, "Block Only Manager", 30, List.of("USER_BLOCK"));
+        long employeeRole = trackedRole(admin, "Blocked Employee", 10, List.of());
+        configureManager(managerRole, List.of(employeeRole), admin);
+        var manager = login(false, managerRole);
+        var employee = login(false, employeeRole);
+
+        mvc.perform(post("/api/admin/users/{userId}/block", employee.id())
+                .header("Authorization", "Bearer " + manager.token()))
+                .andExpect(status().isNoContent());
+        mvc.perform(post("/api/admin/users/{userId}/unblock", employee.id())
+                .header("Authorization", "Bearer " + manager.token()))
+                .andExpect(status().isForbidden());
+
+        assertThat(jdbc.queryForObject("SELECT state FROM users WHERE id = ?", String.class, employee.id()))
+                .isEqualTo("BLOCKED");
+        assertThat(jdbc.queryForObject("""
+                SELECT count(*) FROM access_audit WHERE action = 'USER_UNBLOCK' AND target_user_id = ?
+                """, Long.class, employee.id())).isZero();
+    }
+
+    @Test
+    void superAdminPromotionClearsAssignmentsAndRevokesSessions() throws Exception {
+        var admin = login(true);
+        long roleId = trackedRole(admin, "Promotion Candidate", List.of("PROFILE_READ_ANY"));
+        var employee = login(false, roleId);
+        mvc.perform(put("/api/admin/users/{userId}/extra-permissions/{code}", employee.id(), "USER_LIST")
+                .header("Authorization", "Bearer " + admin.token())).andExpect(status().isNoContent());
+        String email = jdbc.queryForObject("SELECT email FROM users WHERE id = ?", String.class, employee.id());
+        var oldTokens = mapper.readTree(mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
+                .content(mapper.writeValueAsString(Map.of("email", email, "password", PASSWORD))))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsByteArray());
+
+        promote(admin, employee).andExpect(status().isNoContent());
+        assertThat(jdbc.queryForObject("SELECT system_role FROM users WHERE id = ?", String.class, employee.id()))
+                .isEqualTo("SUPER_ADMIN");
+        assertThat(jdbc.queryForObject("SELECT main_role_id FROM users WHERE id = ?", Long.class, employee.id()))
+                .isNull();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM user_extra_permissions WHERE user_id = ?",
+                Long.class, employee.id())).isZero();
+        assertThat(jdbc.queryForList("""
+                SELECT actor_user_id FROM access_audit
+                WHERE action = 'SUPER_ADMIN_ASSIGN' AND target_user_id = ?
+                """, Long.class, employee.id())).containsExactly(admin.id());
+        mvc.perform(get("/api/auth/me")
+                .header("Authorization", "Bearer " + oldTokens.path("accessToken").asText()))
+                .andExpect(status().isUnauthorized());
+        mvc.perform(post("/api/auth/refresh").contentType(MediaType.APPLICATION_JSON)
+                .content(mapper.writeValueAsString(Map.of("refreshToken", oldTokens.path("refreshToken").asText()))))
+                .andExpect(status().isUnauthorized());
+
+        var newTokens = mapper.readTree(mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
+                .content(mapper.writeValueAsString(Map.of("email", email, "password", PASSWORD))))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsByteArray());
+        promote(admin, employee).andExpect(status().isNoContent());
+        assertThat(jdbc.queryForObject("""
+                SELECT count(*) FROM access_audit WHERE action = 'SUPER_ADMIN_ASSIGN' AND target_user_id = ?
+                """, Long.class, employee.id())).isEqualTo(1L);
+        mvc.perform(get("/api/admin/roles")
+                .header("Authorization", "Bearer " + newTokens.path("accessToken").asText()))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void promotionRejectsOrdinaryActorAndBlockedTarget() throws Exception {
+        var admin = login(true);
+        var ordinary = login(false);
+        var target = login(false);
+        promote(ordinary, target).andExpect(status().isForbidden());
+        mvc.perform(put("/api/admin/users/{userId}/super-admin", target.id()))
+                .andExpect(status().isUnauthorized());
+        mvc.perform(post("/api/admin/users/{userId}/block", target.id())
+                .header("Authorization", "Bearer " + admin.token())).andExpect(status().isNoContent());
+        promote(admin, target).andExpect(status().isConflict());
+        assertThat(jdbc.queryForObject("SELECT system_role FROM users WHERE id = ?", String.class, target.id()))
+                .isEqualTo("USER");
+        assertThat(jdbc.queryForObject("SELECT state FROM users WHERE id = ?", String.class, target.id()))
+                .isEqualTo("BLOCKED");
+        assertThat(jdbc.queryForObject("""
+                SELECT count(*) FROM access_audit WHERE action = 'SUPER_ADMIN_ASSIGN' AND target_user_id = ?
+                """, Long.class, target.id())).isZero();
+    }
+
+    @Test
+    void removingSuperAdminRevokesOldTokensAndPreservesAccount() throws Exception {
+        markInstallationInitialized();
+        var admin = login(true);
+        var target = login(true);
+
+        removeSuperAdmin(admin, target).andExpect(status().isNoContent());
+        removeSuperAdmin(admin, target).andExpect(status().isNoContent());
+        assertThat(jdbc.queryForMap("SELECT system_role, state, main_role_id FROM users WHERE id = ?", target.id()))
+                .containsEntry("system_role", "USER")
+                .containsEntry("state", "ACTIVE")
+                .containsEntry("main_role_id", null);
+        assertThat(jdbc.queryForList("""
+                SELECT actor_user_id FROM access_audit
+                WHERE action = 'SUPER_ADMIN_REMOVE' AND target_user_id = ?
+                """, Long.class, target.id())).containsExactly(admin.id());
+        mvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + target.token()))
+                .andExpect(status().isUnauthorized());
+        mvc.perform(post("/api/auth/refresh").contentType(MediaType.APPLICATION_JSON)
+                .content(mapper.writeValueAsString(Map.of("refreshToken", target.refreshToken()))))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void lastActiveSuperAdminCannotBeRemoved() throws Exception {
+        markInstallationInitialized();
+        var admin = login(true);
+        var ordinary = login(false);
+        var blockedAdmin = login(true);
+        jdbc.update("UPDATE users SET state = 'BLOCKED' WHERE id = ?", blockedAdmin.id());
+
+        removeSuperAdmin(ordinary, admin).andExpect(status().isForbidden());
+        removeSuperAdmin(admin, admin).andExpect(status().isConflict());
+        assertThat(jdbc.queryForObject("SELECT system_role FROM users WHERE id = ?", String.class, admin.id()))
+                .isEqualTo("SUPER_ADMIN");
+        assertThat(jdbc.queryForObject("""
+                SELECT count(*) FROM access_audit WHERE action = 'SUPER_ADMIN_REMOVE' AND target_user_id = ?
+                """, Long.class, admin.id())).isZero();
+        mvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + admin.token()))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void concurrentSuperAdminRemovalsLeaveOneActiveAdmin() throws Exception {
+        markInstallationInitialized();
+        var first = login(true);
+        var second = login(true);
+        var start = new java.util.concurrent.CyclicBarrier(2);
+        var seconds = java.util.concurrent.TimeUnit.SECONDS;
+        try (var executor = java.util.concurrent.Executors.newFixedThreadPool(2)) {
+            var a = executor.submit(() -> {
+                start.await(10, seconds);
+                return removeSuperAdmin(first, second).andReturn().getResponse().getStatus();
+            });
+            var b = executor.submit(() -> {
+                start.await(10, seconds);
+                return removeSuperAdmin(second, first).andReturn().getResponse().getStatus();
+            });
+            // The loser gets 401 if its token is checked after revocation, or 403 if it passed authentication first.
+            var statuses = List.of(a.get(20, seconds), b.get(20, seconds));
+            assertThat(statuses.stream().filter(code -> code == 204).count()).isEqualTo(1);
+            assertThat(statuses).allMatch(code -> code == 204 || code == 401 || code == 403);
+        }
+        assertThat(jdbc.queryForObject("""
+                SELECT count(*) FROM users WHERE id IN (?, ?) AND system_role = 'SUPER_ADMIN' AND state = 'ACTIVE'
+                """, Long.class, first.id(), second.id())).isEqualTo(1L);
+        assertThat(jdbc.queryForObject("""
+                SELECT count(*) FROM access_audit WHERE action = 'SUPER_ADMIN_REMOVE' AND target_user_id IN (?, ?)
+                """, Long.class, first.id(), second.id())).isEqualTo(1L);
+    }
+
+    @Test
+    void superAdminCanBlockAndUnblockAnotherButCannotBlockLastActiveAdmin() throws Exception {
+        markInstallationInitialized();
+        var admin = login(true);
+        var other = login(true);
+        var manager = login(false, trackedRole(admin, "Security Manager", 30,
+                List.of("USER_BLOCK", "USER_UNBLOCK")));
+
+        changeAccountState(manager, other, "block").andExpect(status().isForbidden());
+        changeAccountState(admin, other, "block").andExpect(status().isNoContent());
+        changeAccountState(manager, other, "unblock").andExpect(status().isForbidden());
+        changeAccountState(admin, admin, "block").andExpect(status().isConflict());
+        assertThat(jdbc.queryForObject("SELECT state FROM users WHERE id = ?", String.class, admin.id()))
+                .isEqualTo("ACTIVE");
+        assertThat(jdbc.queryForList("SELECT action FROM access_audit WHERE target_user_id = ?", String.class, admin.id()))
+                .isEmpty();
+        mvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + admin.token()))
+                .andExpect(status().isOk());
+
+        changeAccountState(admin, other, "unblock").andExpect(status().isNoContent());
+        assertThat(jdbc.queryForObject("SELECT state FROM users WHERE id = ?", String.class, other.id()))
+                .isEqualTo("ACTIVE");
+        assertThat(jdbc.queryForList("SELECT action FROM access_audit WHERE target_user_id = ? ORDER BY id",
+                String.class, other.id())).containsExactly("USER_BLOCK", "USER_UNBLOCK");
+        mvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + other.token()))
+                .andExpect(status().isUnauthorized());
+        mvc.perform(post("/api/auth/refresh").contentType(MediaType.APPLICATION_JSON)
+                .content(mapper.writeValueAsString(Map.of("refreshToken", other.refreshToken()))))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void concurrentBlockAndRemovalLeaveOneActiveSuperAdmin() throws Exception {
+        markInstallationInitialized();
+        var first = login(true);
+        var second = login(true);
+        var start = new java.util.concurrent.CyclicBarrier(2);
+        var seconds = java.util.concurrent.TimeUnit.SECONDS;
+        try (var executor = java.util.concurrent.Executors.newFixedThreadPool(2)) {
+            var block = executor.submit(() -> {
+                start.await(10, seconds);
+                return changeAccountState(first, second, "block").andReturn().getResponse().getStatus();
+            });
+            var remove = executor.submit(() -> {
+                start.await(10, seconds);
+                return removeSuperAdmin(second, first).andReturn().getResponse().getStatus();
+            });
+            var statuses = List.of(block.get(20, seconds), remove.get(20, seconds));
+            assertThat(statuses.stream().filter(code -> code == 204).count()).isEqualTo(1);
+            assertThat(statuses).allMatch(code -> code == 204 || code == 401 || code == 403);
+        }
+        assertThat(jdbc.queryForObject("""
+                SELECT count(*) FROM users WHERE id IN (?, ?) AND system_role = 'SUPER_ADMIN' AND state = 'ACTIVE'
+                """, Long.class, first.id(), second.id())).isEqualTo(1L);
+    }
+
+    private org.springframework.test.web.servlet.ResultActions changeAccountState(Actor actor, Actor target, String action)
+            throws Exception {
+        return mvc.perform(post("/api/admin/users/{userId}/" + action, target.id())
+                .header("Authorization", "Bearer " + actor.token()));
+    }
+
+    private void markInstallationInitialized() {
+        jdbc.update("INSERT INTO installation_state (id, initialized_at) VALUES (1, CURRENT_TIMESTAMP) ON CONFLICT DO NOTHING");
+    }
+
+    private org.springframework.test.web.servlet.ResultActions removeSuperAdmin(Actor actor, Actor target)
+            throws Exception {
+        return mvc.perform(delete("/api/admin/users/{userId}/super-admin", target.id())
+                .header("Authorization", "Bearer " + actor.token()));
+    }
+
+    private org.springframework.test.web.servlet.ResultActions promote(Actor actor, Actor target) throws Exception {
+        return mvc.perform(put("/api/admin/users/{userId}/super-admin", target.id())
+                .header("Authorization", "Bearer " + actor.token()));
+    }
+
     private void configureManager(long roleId, List<Long> allowed, Actor admin) throws Exception {
         mvc.perform(put("/api/admin/roles/{id}/assignable-roles", roleId)
                 .header("Authorization", "Bearer " + admin.token()).contentType(MediaType.APPLICATION_JSON)

@@ -1,6 +1,7 @@
 package com.minipay.wallet;
 
 import java.math.BigDecimal;
+import java.util.List;
 import java.util.UUID;
 
 import org.springframework.stereotype.Service;
@@ -98,14 +99,7 @@ public class WalletService {
 
     @Transactional
     public IdempotencyResponse transferForUser(Long actorId, Long toWalletId, BigDecimal amount, UUID key) {
-        Long fromWalletId = ownWalletId(actorId);
-        if (fromWalletId.equals(toWalletId)) {
-            throw new SelfTransferException(fromWalletId);
-        }
-        walletRepository.findOwnerState(toWalletId)
-                .filter(state -> state == UserState.ACTIVE)
-                .orElseThrow(() -> new WalletNotFoundException(toWalletId));
-        return transfer(fromWalletId, toWalletId, amount, key);
+        return transfer(ownWalletId(actorId), toWalletId, amount, key);
     }
 
     private Long ownWalletId(Long actorId) {
@@ -116,6 +110,7 @@ public class WalletService {
     @Transactional
     public IdempotencyResponse deposit(Long walletId, BigDecimal amount, UUID idempotencyKey) {
         AmountValidator.validateAmount(amount);
+        requireActiveWalletOwners(walletId, null);
 
         return idempotencyService.execute(idempotencyKey,
                 TransactionType.DEPOSIT,
@@ -136,6 +131,7 @@ public class WalletService {
     @Transactional
     public IdempotencyResponse withdraw(Long walletId, BigDecimal amount, UUID idempotencyKey) {
         AmountValidator.validateAmount(amount);
+        requireActiveWalletOwners(walletId, null);
 
         return idempotencyService.execute(idempotencyKey,
                 TransactionType.WITHDRAWAL,
@@ -159,6 +155,7 @@ public class WalletService {
             throw new SelfTransferException(fromWalletId);
         }
         AmountValidator.validateAmount(amount);
+        requireActiveWalletOwners(fromWalletId, toWalletId);
 
         return idempotencyService.execute(idempotencyKey,
                 TransactionType.TRANSFER,
@@ -186,6 +183,29 @@ public class WalletService {
                     transactionRepository.save(transaction);
                     return new TransactionResponse(transaction);
                 });
+    }
+
+    private void requireActiveWalletOwners(Long walletId, Long recipientWalletId) {
+        Long ownerId = walletOwnerId(walletId);
+        Long recipientId = recipientWalletId == null ? null : walletOwnerId(recipientWalletId);
+        List<User> owners = userRepository.findAllByIdsForUpdate(
+                recipientId == null ? List.of(ownerId) : List.of(ownerId, recipientId));
+        requireActiveOwner(owners, ownerId, walletId);
+        if (recipientId != null) {
+            requireActiveOwner(owners, recipientId, recipientWalletId);
+        }
+    }
+
+    private Long walletOwnerId(Long walletId) {
+        return walletRepository.findOwnerId(walletId)
+                .orElseThrow(() -> new WalletNotFoundException(walletId));
+    }
+
+    private static void requireActiveOwner(List<User> owners, Long ownerId, Long walletId) {
+        if (owners.stream().noneMatch(owner -> ownerId.equals(owner.getId())
+                && owner.getState() == UserState.ACTIVE)) {
+            throw new WalletNotFoundException(walletId);
+        }
     }
 
     private Wallet getWalletForUpdate(Long walletId) {

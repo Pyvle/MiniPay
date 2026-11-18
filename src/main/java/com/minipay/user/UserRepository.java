@@ -15,6 +15,8 @@ public interface UserRepository extends JpaRepository<User, Long>{
 
     boolean existsByEmail(String email);
 
+    long countBySystemRoleAndState(SystemRole systemRole, UserState state);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT u FROM User u WHERE u.email = :email")
     Optional<User> findByEmailForUpdate(@Param ("email") String email);
